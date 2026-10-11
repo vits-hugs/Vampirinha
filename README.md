@@ -40,17 +40,20 @@ Quando o sangue acaba, a vampira se transforma em morcego:
 | --- | --- |
 | Andar | `W` `A` `S` `D` |
 | Mirar | mouse |
-| Elemento **perna** | `Shift` |
+| Elemento **dente** | `Shift` |
 | Elemento **braço** | botão esquerdo do mouse |
-| Elemento **dente** | `Espaço` |
-| **Lançar** o que está na fila | botão direito do mouse (na direção do ponteiro) |
+| Elemento **perna** | botão direito do mouse |
+| **Lançar** | **automático quando a barra de habilidades enche (3 elementos)**, na direção do ponteiro |
+| Lançar antes, com 1 ou 2 elementos | `Espaço` |
+| Cuspir de volta o tiro engolido no parry | `Espaço` com a fila vazia |
 | Limpar a fila | `Q` |
 | **Morder** (só na forma de morcego) | botão direito do mouse |
 | Pausa | `P` ou `Esc` |
 | Tela cheia | `F11` |
 
-Funciona como o Magicka: você empilha até **3 elementos** na barra de cima e depois lança.
-O nome do que vai sair aparece embaixo da barra.
+Funciona como o Magicka: você empilha até **3 elementos** na barra de cima. **Quando a barra enche, a
+habilidade é lançada sozinha** (se ainda estiver em recarga, sai assim que terminar). Para lançar uma fila
+incompleta (por exemplo `dente + perna`), aperte `Espaço`. O nome do que vai sair aparece embaixo da barra.
 
 ## Elementos e combos
 
@@ -91,10 +94,30 @@ Eles agem em grupo: um coordenador distribui papéis a cada 0,25 s e todos mant�
   No máximo 2 cachorros dão o bote ao mesmo tempo.
 - As ondas crescem a cada rodada, com mais inimigos de cada tipo.
 
+## Chefe: o Gigante
+
+A cada **5 ondas** (5, 10, 15...) o Gigante entra primeiro, acompanhado de alguns inimigos. Ele é enorme, quase
+não sofre empurrão, não é atordoado e rende menos sangue por dano (60%) que os inimigos normais. A vida dele
+aparece numa barra grande embaixo da tela, e abaixo dela fica a **barra de habilidade**.
+
+Todo golpe dele tem um **aviso vermelho no chão** e uma animação de soco própria:
+
+| Golpe | O que faz | Dano |
+| --- | --- | --- |
+| **Direto** | soco reto e rápido, em linha | 14 |
+| **Gancho** | soco em arco largo (200°) à frente | 16 |
+| **Soco no chão** | levanta os dois punhos e bate; área grande ao redor dele | 20 |
+| **Investida** | avança em linha reta com os punhos à frente | 18 |
+| **Chuva de Socos** (habilidade) | marca 12 pontos no chão, os primeiros em cima de você, e os punhos caem um a um | 16 cada |
+
+- A **barra de habilidade** enche com o tempo (~22 s) e também cada vez que ele apanha. Quando **enche, ele solta a
+  Chuva de Socos** e a barra zera.
+- Abaixo de 50% de vida ele **enfurece**: anda mais rápido, golpeia com menos aviso e enche a barra mais depressa.
+- Para treinar contra ele: `./run.sh --wave 5` começa direto na onda 5.
 ## Estrutura
 
 ```
-main.py              o jogo inteiro (entidades, combos, HUD)
+main.py              o jogo inteiro (entidades, chefe, combos, HUD)
 tests/test_smoke.py  testes sem janela das mecânicas (python tests/test_smoke.py)
 run.sh               atalho que cria o venv e roda
 ```

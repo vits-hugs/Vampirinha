@@ -14,7 +14,7 @@ import pygame  # noqa: E402
 from pygame.math import Vector2 as V2  # noqa: E402
 
 import main as vamp  # noqa: E402
-from main import ARM, LEG, TOOTH, Enemy, Game  # noqa: E402
+from main import ARM, LEG, TOOTH, Boss, Enemy, Game  # noqa: E402
 
 pygame.init()
 screen = pygame.display.set_mode((vamp.W, vamp.H))
@@ -344,6 +344,190 @@ def test_gunners_do_not_fire_all_at_once():
         _no_damage(g)
         g.update(DT, V2())
     assert sum(1 for e in guns if e.windup > 0) <= 1, "tiros escalonados, nao uma salva"
+
+
+# ------------------------------------------------------------------ controles
+def test_full_bar_casts_by_itself():
+    g = fresh()
+    g.add_element(TOOTH)
+    g.add_element(TOOTH)
+    assert len(g.player.queue) == 2 and not g.projs, "com 2 elementos ainda nao lanca"
+    g.add_element(TOOTH)
+    assert not g.player.queue and g.projs, "barra cheia lanca sozinha"
+
+
+def test_space_casts_partial_queue_and_spits_back():
+    g = fresh()
+    g.add_element(TOOTH)
+    g.add_element(LEG)
+    assert not g.projs
+    g.space_action()
+    assert any(p.kind == "leg" for p in g.projs), "ESPACO lanca a fila incompleta"
+    g2 = fresh()
+    g2.player.mouth = [1]
+    g2.space_action()
+    assert any(p.kind == "bullet" for p in g2.projs), "ESPACO com fila vazia cospe o tiro de volta"
+
+
+def test_full_bar_waits_for_cooldown():
+    g = fresh()
+    g.player.cast_cd = 0.4
+    for _ in range(3):
+        g.add_element(ARM)
+    assert len(g.player.queue) == 3, "espera o fim da recarga"
+    step(g, 40)
+    assert not g.player.queue, "lanca assim que a recarga termina"
+
+
+def test_right_click_is_leg_and_bat_bites():
+    g = fresh()
+    g.right_click()
+    assert g.player.queue == [LEG]
+    g.enemies.append(Enemy("sword", g.player.pos + V2(900, 900)))
+    e = Enemy("sword", g.player.pos + V2(45, 0))
+    e.hp = 5
+    g.enemies.append(e)
+    g.become_bat()
+    g.player.invuln = 0
+    g.right_click()
+    assert e.dead and not g.player.bat, "no morcego o botao direito morde"
+
+
+# ---------------------------------------------------------------------- chefe
+def boss_fresh(dist=150):
+    g = fresh()
+    b = Boss(g.player.pos + V2(dist, 0), 700)
+    b.cd = 99
+    g.enemies.append(b)
+    g.player.blood = 80
+    hits = []
+    orig = g.hurt_player
+
+    def spy(dmg, src, knock=260.0):
+        r = orig(dmg, src, knock)
+        if r:
+            hits.append(dmg)
+        return r
+
+    g.hurt_player = spy
+    return g, b, hits
+
+
+def run_attack(g, b, name, seconds):
+    b.start(name, norm_dir(g, b), 1.0)
+    for _ in range(int(seconds * 60)):
+        g.player.blood = 80
+        g.update(DT, V2())
+
+
+def norm_dir(g, b):
+    return (g.player.pos - b.pos).normalize()
+
+
+def test_boss_jab_hits_in_reach():
+    g, b, hits = boss_fresh(150)
+    run_attack(g, b, "jab", 0.8)
+    assert hits == [14]
+
+
+def test_boss_hook_slam_charge_hit():
+    g, b, hits = boss_fresh(110)
+    run_attack(g, b, "hook", 1.2)
+    assert hits == [16], hits
+    g, b, hits = boss_fresh(120)
+    run_attack(g, b, "slam", 1.6)
+    assert hits == [20], hits
+    g, b, hits = boss_fresh(200)
+    run_attack(g, b, "charge", 1.5)
+    assert hits == [18], hits
+
+
+def test_boss_attacks_have_a_telegraph_and_can_be_dodged():
+    g, b, hits = boss_fresh(150)
+    b.start("jab", norm_dir(g, b), 1.0)
+    assert b.phase == "windup", "todo golpe comeca com um aviso"
+    g.player.pos = V2(g.player.pos.x, g.player.pos.y + 220)  # fora do alcance
+    for _ in range(60):
+        g.player.blood = 80
+        g.player.pos.y = b.pos.y + 220
+        g.update(DT, V2())
+    assert not hits
+
+
+def test_boss_special_bar_fills_and_releases_rain():
+    g, b, hits = boss_fresh(400)
+    b.cd = 99
+    step(g, 60 * 5)
+    assert 15 < b.special < 40, "a barra enche com o tempo (%.1f)" % b.special
+    before = b.special
+    g.damage_enemy(b, 40, g.player.pos)
+    assert b.special > before + 8, "apanhar tambem enche"
+    b.special = 100
+    g.player.pos = V2(g.player.pos.x, g.player.pos.y)
+    seen_hazards = 0
+    for _ in range(60 * 6):
+        g.player.blood = 80
+        g.update(DT, V2())
+        seen_hazards = max(seen_hazards, len(g.hazards))
+    assert seen_hazards >= 10, "a habilidade solta varios impactos"
+    assert 16 in hits, "quem fica parado leva a Chuva de Socos"
+    assert b.special < 30 and not g.hazards, "barra zera depois de soltar"
+
+
+def test_boss_resists_knockback_and_stun_and_heals_less():
+    g, b, hits = boss_fresh(300)
+    g.damage_enemy(b, 10, g.player.pos, knock=600, stun=1.0)
+    assert b.vel.length() < 100 and b.stun == 0
+    g2 = fresh()
+    e = Enemy("sword", g2.player.pos + V2(300, 0))
+    e.hp = 500
+    g2.enemies.append(e)
+    g2.player.blood = 40
+    g2.damage_enemy(e, 20, g2.player.pos)
+    normal = g2.player.blood - 40
+    g.player.blood = 40
+    g.damage_enemy(b, 20, g.player.pos)
+    assert g.player.blood - 40 < normal
+
+
+def test_boss_death_and_boss_waves():
+    g, b, hits = boss_fresh(300)
+    b.hp = 1
+    g.hazards.append({"pos": V2(0, 0), "r": 50, "t": 5, "dmg": 16, "done": False})
+    g.damage_enemy(b, 5, g.player.pos)
+    assert b.dead and not g.hazards and "derrotado" in g.banner[0]
+    g2 = Game()
+    g2.start()
+    g2.start_wave(5)
+    assert g2.spawn_q[0] == "boss" and "CHEFE" in g2.banner[0]
+    g3 = Game()
+    g3.first_wave = 5
+    g3.start()
+    assert g3.wave == 4
+
+
+def test_boss_pushes_player_instead_of_being_pushed():
+    g, b, hits = boss_fresh(40)
+    pos = V2(b.pos)
+    step(g, 5)
+    assert (b.pos - pos).length() < 5 and (g.player.pos - b.pos).length() >= 60
+
+
+def test_boss_render_all_phases():
+    g, b, hits = boss_fresh(200)
+    for name in ("jab", "hook", "slam", "charge", "rain"):
+        b.phase, b.attack = "walk", None
+        b.start(name, norm_dir(g, b), 1.0)
+        for i in range(60 * 4):
+            g.player.blood = 80
+            g.player.invuln = 99
+            g.update(DT, V2())
+            if i % 6 == 0:
+                g.draw(screen, (640, 360))
+            if b.phase == "walk":
+                break
+    b.enraged
+    g.draw(screen, (640, 360))
 
 
 def test_render_all_states():

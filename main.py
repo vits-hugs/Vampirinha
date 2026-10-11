@@ -240,10 +240,19 @@ class Enemy:
             self.hp = self.max_hp = 18
             self.speed = random.uniform(190, 215)
             self.r = 12
+        elif kind == "boss":
+            self.hp = self.max_hp = 700
+            self.speed = 70
+            self.r = 52
         else:
             self.hp = self.max_hp = 24
             self.speed = random.uniform(66, 80)
             self.r = 15
+        self.mass = 10.0 if kind == "boss" else 1.0
+        self.knock_resist = 0.12 if kind == "boss" else 1.0
+        self.stun_resist = 0.0 if kind == "boss" else 1.0
+        self.lifesteal_mult = 0.6 if kind == "boss" else 1.0
+        self.special = 0.0
         self.stun = 0.0
         self.flash = 0.0
         self.cd = random.uniform(0.6, 1.6)
@@ -273,6 +282,8 @@ class Enemy:
             dd = self.pos - o.pos
             dl = dd.length()
             rad = sep_r if o.kind == self.kind else min(sep_r, 60)
+            if o.kind == "boss":
+                rad = o.r + 45
             if 0 < dl < rad:
                 push += dd / dl * (1 - dl / rad)
         v += push * 1.6
@@ -475,6 +486,302 @@ class Enemy:
             pygame.draw.circle(s, (255, 60, 60), sp + V2(0, -self.r - 14), 5)
 
 
+BOSS_ATTACKS = {  # (aviso, golpe, recuperação) em segundos
+    "jab": (0.50, 0.15, 0.40),
+    "hook": (0.75, 0.25, 0.55),
+    "slam": (1.00, 0.12, 0.80),
+    "charge": (0.60, 0.50, 0.70),
+    "rain": (1.10, 2.40, 0.90),
+}
+BOSS_REACH = 175           # alcance do soco/gancho a partir do centro do gigante
+BOSS_SLAM_R = 200          # raio do soco no chão
+BOSS_RAIN_TELEGRAPH = 0.85  # tempo de aviso de cada impacto da Chuva de Socos
+BOSS_SPECIAL_RATE = 4.5    # % da barra de habilidade por segundo
+
+
+def seg_dist(p, a, b):
+    ab = b - a
+    L2 = ab.length_squared()
+    if L2 < 1e-6:
+        return (p - a).length()
+    t = max(0.0, min(1.0, (p - a).dot(ab) / L2))
+    return (p - (a + ab * t)).length()
+
+
+def smooth(t):
+    t = max(0.0, min(1.0, t))
+    return t * t * (3 - 2 * t)
+
+
+class Boss(Enemy):
+    """Gigante: golpes de soco telegrafados e uma habilidade especial (Chuva de Socos)
+    liberada quando a barra de habilidade enche."""
+
+    def __init__(self, pos, hp):
+        super().__init__("boss", pos)
+        self.hp = self.max_hp = hp
+        self.phase = "walk"        # walk | windup | strike | recover
+        self.attack = None
+        self.pt = 0.0              # tempo restante da fase
+        self.pdur = 1.0            # duração da fase atual (aviso/recuperação)
+        self.sdur = 0.1            # duração do golpe
+        self.special = 0.0         # barra de habilidade (0..100)
+        self.punch_side = 1
+        self.anim = 0.0
+        self.cd = 1.2
+        self.charge_dir = V2(1, 0)
+
+    @property
+    def enraged(self):
+        return self.hp < self.max_hp * 0.5
+
+    # ---- comportamento
+    def update(self, g, dt):
+        self.flash = max(0.0, self.flash - dt)
+        self.pos += self.vel * dt
+        self.vel *= max(0.0, 1 - 8 * dt)
+        self.anim += dt
+        to = g.player.pos - self.pos
+        d = to.length() or 0.001
+        dirv = to / d
+        self.cd -= dt
+        rate = 0.8 if self.enraged else 1.0
+        if self.phase == "walk":
+            self.facing = math.atan2(dirv.y, dirv.x)
+            self.special = min(100.0, self.special + dt * BOSS_SPECIAL_RATE * (1.5 if self.enraged else 1.0))
+            if d > 125:
+                self.pos += dirv * self.speed * (1.25 if self.enraged else 1.0) * dt
+            if self.special >= 100:
+                self.start("rain", dirv, rate)
+            elif self.cd <= 0 and d < 440:
+                self.start(self.pick_attack(d), dirv, rate)
+        else:
+            self.pt -= dt
+            if self.phase == "windup":
+                if self.attack != "rain" and self.pt > 0.12:  # acompanha o alvo até o último instante
+                    self.aim = dirv
+                    self.facing = math.atan2(dirv.y, dirv.x)
+                if self.pt <= 0:
+                    self.phase = "strike"
+                    self.pt = self.sdur
+                    self.on_strike(g, d)
+            elif self.phase == "strike":
+                self.strike(g, dt, d)
+                if self.pt <= 0:
+                    self.phase = "recover"
+                    self.pdur = self.pt = BOSS_ATTACKS[self.attack][2] * rate
+            elif self.pt <= 0:
+                self.phase = "walk"
+                self.attack = None
+                self.cd = random.uniform(0.4, 0.9) * rate
+        self.pos.x = max(self.r, min(WORLD_W - self.r, self.pos.x))
+        self.pos.y = max(self.r, min(WORLD_H - self.r, self.pos.y))
+
+    def pick_attack(self, d):
+        if d < 190:
+            return random.choice(["jab", "jab", "hook", "hook", "slam"])
+        return random.choice(["charge", "charge", "slam" if d < 260 else "charge"])
+
+    def start(self, attack, dirv, rate):
+        self.attack = attack
+        self.phase = "windup"
+        self.pdur = self.pt = BOSS_ATTACKS[attack][0] * rate
+        self.sdur = BOSS_ATTACKS[attack][1]
+        self.aim = V2(dirv)
+        self.facing = math.atan2(dirv.y, dirv.x)
+        self.hit_done = False
+        self.punch_side = -self.punch_side
+        if attack == "rain":
+            self.special = 0.0
+
+    def on_strike(self, g, d):
+        p = g.player
+        a = self.attack
+        if a == "slam":
+            g.add_fx("ring", self.pos, 0, BOSS_SLAM_R, 0.45, (255, 140, 60))
+            g.add_fx("disc", self.pos, 0, BOSS_SLAM_R, 0.2, (255, 120, 50))
+            g.dust(self.pos + self.aim * 70, 20)
+            g.shake = max(g.shake, 16)
+            if d < BOSS_SLAM_R + p.r:
+                g.hurt_player(20, self.pos, knock=520)
+        elif a == "hook":
+            g.add_fx("cone", self.pos, math.atan2(self.aim.y, self.aim.x), BOSS_REACH, 0.25, (255, 200, 150), arc=200)
+        elif a == "charge":
+            self.charge_dir = V2(self.aim)
+        elif a == "rain":
+            g.add_text(self.pos + V2(0, -90), "CHUVA DE SOCOS!", (255, 200, 120), 1.4, 30)
+            for i in range(12):
+                if i < 3:
+                    off = V2(random.uniform(-45, 45), random.uniform(-45, 45))
+                else:
+                    ang = random.uniform(0, math.tau)
+                    off = V2(math.cos(ang), math.sin(ang)) * random.uniform(80, 330)
+                pos = p.pos + off
+                pos.x = max(60, min(WORLD_W - 60, pos.x))
+                pos.y = max(60, min(WORLD_H - 60, pos.y))
+                delay = BOSS_RAIN_TELEGRAPH + i * 0.17
+                g.hazards.append({"pos": pos, "r": 95, "t": delay, "dmg": 16, "done": False})
+
+    def strike(self, g, dt, d):
+        p = g.player
+        a = self.attack
+        if a == "jab":
+            if not self.hit_done and seg_dist(p.pos, self.pos, self.pos + self.aim * BOSS_REACH) < 26 + p.r:
+                self.hit_done = True
+                g.hurt_player(14, self.pos, knock=420)
+        elif a == "hook":
+            e = 1 - self.pt / self.sdur
+            if not self.hit_done and e > 0.2 and in_cone(self.pos, math.atan2(self.aim.y, self.aim.x), p.pos, BOSS_REACH, 200, p.r):
+                self.hit_done = True
+                g.hurt_player(16, self.pos, knock=450)
+        elif a == "charge":
+            self.pos += self.charge_dir * 480 * dt
+            self.facing = math.atan2(self.charge_dir.y, self.charge_dir.x)
+            if not self.hit_done and d < self.r + p.r + 12:
+                self.hit_done = True
+                g.hurt_player(18, self.pos, knock=560)
+
+    # ---- desenho
+    def phase_progress(self):
+        if self.phase == "windup":
+            return 1 - max(0.0, self.pt) / self.pdur
+        if self.phase == "strike":
+            return 1 - max(0.0, self.pt) / self.sdur
+        if self.phase == "recover":
+            return 1 - max(0.0, self.pt) / self.pdur
+        return 0.0
+
+    def fists(self, fv, perp):
+        """Posição (relativa ao centro) e escala de cada punho, conforme a animação do golpe."""
+        ph, at = self.phase, self.attack
+        prog = smooth(self.phase_progress())
+        out = []
+        for side in (1, -1):
+            idle = perp * side * 54 + fv * (28 + 9 * math.sin(self.anim * 5) * side)
+            pos, sc = idle, 1.0
+            punching = side == self.punch_side
+            if ph != "walk" and at == "jab" and punching:
+                back = perp * side * 46 - fv * 30
+                ext = fv * (BOSS_REACH - 25) + perp * side * 10
+                pos = idle.lerp(back, prog) if ph == "windup" else (back.lerp(ext, prog) if ph == "strike" else ext.lerp(idle, prog))
+            elif ph != "walk" and at == "hook" and punching:
+                a0 = math.atan2(fv.y, fv.x)
+
+                def arc(t, a0=a0, side=side):
+                    ang = a0 - side * 1.75 + side * 3.5 * t
+                    r = 125 + 25 * math.sin(math.pi * t)
+                    return V2(math.cos(ang), math.sin(ang)) * r
+
+                if ph == "windup":
+                    pos = idle.lerp(arc(0), prog)
+                elif ph == "strike":
+                    pos = arc(prog)
+                else:
+                    pos = arc(1).lerp(idle, prog)
+            elif ph != "walk" and at == "slam":
+                up = perp * side * 38 + fv * 4
+                down = fv * 78 + perp * side * 30
+                if ph == "windup":
+                    pos, sc = idle.lerp(up, prog), 1 + 0.55 * prog
+                elif ph == "strike":
+                    pos, sc = up.lerp(down, prog), 1.55 - 0.55 * prog
+                else:
+                    pos = down.lerp(idle, prog)
+            elif ph != "walk" and at == "charge":
+                back = perp * side * 50 - fv * 22
+                fwd = fv * 100 + perp * side * 34
+                pos = idle.lerp(back, prog) if ph == "windup" else (fwd if ph == "strike" else fwd.lerp(idle, prog))
+            elif ph != "walk" and at == "rain":
+                up = perp * side * 38 + fv * 4
+                if ph == "windup":
+                    pos, sc = idle.lerp(up, prog), 1 + 0.55 * prog
+                elif ph == "strike":
+                    down_now = (int(self.anim * 3.6) % 2 == 0) == (side == 1)
+                    pos, sc = (fv * 58 + perp * side * 22, 1.0) if down_now else (up, 1.55)
+                else:
+                    pos, sc = up.lerp(idle, prog), 1.55 - 0.55 * prog
+            out.append((pos, sc))
+        return out
+
+    def draw_telegraph(self, ov, cam):
+        if self.phase != "windup":
+            return
+        prog = 1 - max(0.0, self.pt) / self.pdur
+        alpha = int(30 + 110 * prog)
+        col = (255, 60, 50, alpha)
+        sp = self.pos - cam
+        a = self.attack
+        ang = math.atan2(self.aim.y, self.aim.x)
+        fwd = V2(math.cos(ang), math.sin(ang))
+        side = V2(-fwd.y, fwd.x)
+        if a == "slam":
+            pygame.draw.circle(ov, col, sp, BOSS_SLAM_R)
+            pygame.draw.circle(ov, (255, 210, 140, 220), sp, max(4, int(BOSS_SLAM_R * prog)), 3)
+        elif a == "jab":
+            half = 26
+            pts = [sp + side * half, sp - side * half, sp - side * half + fwd * BOSS_REACH, sp + side * half + fwd * BOSS_REACH]
+            pygame.draw.polygon(ov, col, pts)
+        elif a == "hook":
+            pts = [sp]
+            for i in range(17):
+                t = ang - math.radians(100) + math.radians(200) * i / 16
+                pts.append(sp + V2(math.cos(t), math.sin(t)) * BOSS_REACH)
+            pygame.draw.polygon(ov, col, pts)
+        elif a == "charge":
+            half = 45
+            length = 480 * BOSS_ATTACKS["charge"][1]
+            pts = [sp + side * half, sp - side * half, sp - side * half + fwd * length, sp + side * half + fwd * length]
+            pygame.draw.polygon(ov, col, pts)
+
+    def draw(self, s, cam):
+        sp = self.pos - cam
+        if not (-170 < sp.x < W + 170 and -170 < sp.y < H + 170):
+            return
+        r = self.r
+        pygame.draw.ellipse(s, (8, 6, 12), (sp.x - r * 1.05, sp.y + r * 0.45, r * 2.1, r * 0.95))
+        fv = V2(math.cos(self.facing), math.sin(self.facing))
+        perp = V2(-fv.y, fv.x)
+        enr = self.enraged
+        fl = self.flash > 0
+        skin = (255, 255, 255) if fl else ((170, 88, 78) if enr else (150, 108, 88))
+        vest = (255, 255, 255) if fl else (92, 26, 40)
+        dark = (48, 22, 26)
+        lean = fv * 10 if (self.attack == "charge" and self.phase == "strike") else V2()
+        crouch = 0.92 if (self.attack == "charge" and self.phase == "windup") else 1.0
+        c = sp + lean
+        if enr:
+            pulse = 0.5 + 0.5 * math.sin(self.anim * 9)
+            pygame.draw.circle(s, (150, 20, 30), c, r + 8 + int(5 * pulse), 3)
+        if self.attack == "rain" and self.phase != "recover":
+            pygame.draw.circle(s, (255, 180, 70), c, r + 10 + int(4 * math.sin(self.anim * 14)), 3)
+        pygame.draw.circle(s, dark, c, int(r * crouch) + 3)
+        pygame.draw.circle(s, vest, c, int(r * crouch))
+        pygame.draw.circle(s, (176, 134, 44), c, int(r * 0.55), 4)
+        head = c + fv * 18
+        pygame.draw.circle(s, dark, head, 22)
+        pygame.draw.circle(s, skin, head, 19)
+        for sd in (1, -1):  # chifres
+            base = head + perp * sd * 13 - fv * 4
+            pygame.draw.polygon(s, (214, 204, 182), [base + perp * sd * 3, base - perp * sd * 3, base + perp * sd * 12 - fv * 10])
+            eye = head + fv * 8 + perp * sd * 6
+            pygame.draw.circle(s, (255, 70, 70) if enr else (250, 220, 120), eye, 3)
+        pygame.draw.line(s, dark, head + fv * 5 + perp * 10, head + fv * 10 - perp * 10, 3)
+        pygame.draw.line(s, (240, 235, 215), head + fv * 14 + perp * 5, head + fv * 18 + perp * 5, 3)
+        pygame.draw.line(s, (240, 235, 215), head + fv * 14 - perp * 5, head + fv * 18 - perp * 5, 3)
+        for side, (fpos, sc) in zip((1, -1), self.fists(fv, perp)):
+            shoulder = c + perp * side * 42
+            fist = c + fpos
+            pygame.draw.line(s, dark, shoulder, fist, 25)
+            pygame.draw.line(s, skin, shoulder, fist, 19)
+            fr = int(21 * sc)
+            pygame.draw.circle(s, dark, fist, fr + 3)
+            pygame.draw.circle(s, skin, fist, fr)
+            fd = V2(fpos).normalize() if fpos.length() > 1 else fv
+            fp = V2(-fd.y, fd.x)
+            for k in (-1, 0, 1):
+                pygame.draw.line(s, dark, fist + fd * fr * 0.55 + fp * k * fr * 0.45, fist + fd * fr * 0.95 + fp * k * fr * 0.45, 2)
+
+
 class Player:
     def __init__(self, pos):
         self.pos = V2(pos)
@@ -643,6 +950,7 @@ class Game:
         self.mouse = V2(WORLD_W / 2 + 100, WORLD_H / 2)
         self.state = "menu"
         self.camera = V2()
+        self.first_wave = 1
         self.reset()
 
     # ---- preparação
@@ -691,6 +999,7 @@ class Game:
         self.spawn_t = 0.0
         self.break_t = 1.5
         self.ai_t = 0.0
+        self.hazards = []
         self.ai_aim = 0.0
         self.gun_cd = 0.0
         self.announced = True
@@ -700,6 +1009,7 @@ class Game:
     def start(self):
         random.seed()
         self.reset()
+        self.wave = self.first_wave - 1
         self.state = "play"
 
     def game_over(self):
@@ -711,6 +1021,25 @@ class Game:
     def add_element(self, e):
         if self.state == "play" and not self.player.bat and len(self.player.queue) < 3:
             self.player.queue.append(e)
+            self.try_auto_cast()
+
+    def try_auto_cast(self):
+        """Barra de habilidades cheia (3 elementos): a habilidade é lançada sozinha."""
+        p = self.player
+        if self.state == "play" and not p.bat and len(p.queue) >= 3 and p.cast_cd <= 0 and not p.dash:
+            self.cast()
+
+    def right_click(self):
+        """Botão direito: elemento perna; na forma de morcego, morder."""
+        if self.player.bat:
+            self.cast()
+        else:
+            self.add_element(LEG)
+
+    def space_action(self):
+        """ESPAÇO: lança já a fila incompleta, ou cospe de volta o tiro guardado."""
+        if not self.player.bat:
+            self.cast()
 
     def clear_queue(self):
         self.player.queue.clear()
@@ -736,13 +1065,20 @@ class Game:
             life = random.uniform(0.25, 0.6)
             self.parts.append([V2(pos), v, life, life, random.choice([(170, 15, 35), (210, 30, 50), (120, 10, 25)]), random.uniform(2, 5)])
 
+    def dust(self, pos, n):
+        for _ in range(n):
+            a = random.uniform(0, math.tau)
+            v = V2(math.cos(a), math.sin(a)) * random.uniform(60, 260)
+            life = random.uniform(0.3, 0.7)
+            self.parts.append([V2(pos), v, life, life, random.choice([(120, 104, 96), (92, 80, 76), (150, 130, 118)]), random.uniform(3, 7)])
+
     def splat(self, pos):
         for _ in range(random.randint(3, 6)):
             off = V2(random.uniform(-18, 18), random.uniform(-18, 18))
             pygame.draw.circle(self.ground, random.choice([(70, 8, 22), (88, 12, 28)]), pos + off, random.randint(3, 9))
 
     # ---- dano
-    def hurt_player(self, dmg, src):
+    def hurt_player(self, dmg, src, knock=260.0):
         p = self.player
         if self.state != "play" or p.invuln > 0 or p.dash:
             return False
@@ -755,7 +1091,7 @@ class Game:
         p.blood -= dmg
         p.invuln = 0.45
         p.flash = 0.18
-        p.vel += norm(p.pos - src) * 260
+        p.vel += norm(p.pos - src) * knock
         self.add_text(p.pos + V2(0, -30), "-%d" % dmg, (255, 90, 110), 0.7, 22)
         if p.blood <= 0 and not p.frenzy:
             self.become_bat()
@@ -807,7 +1143,11 @@ class Game:
         real = min(dmg, e.hp)
         e.hp -= dmg
         e.flash = 0.12
-        self.player.add_blood(real * LIFESTEAL, self)
+        self.player.add_blood(real * LIFESTEAL * e.lifesteal_mult, self)
+        if e.kind == "boss":  # apanhar também enche a barra de habilidade dele
+            e.special = min(100.0, e.special + real * 0.25)
+        knock *= e.knock_resist
+        stun *= e.stun_resist
         if knock:
             e.vel += norm(e.pos - src) * knock
         if stun:
@@ -823,6 +1163,13 @@ class Game:
             self.blood_burst(e.pos, 20, 260)
             self.splat(e.pos)
             self.shake = max(self.shake, 6)
+            if e.kind == "boss":
+                self.hazards.clear()
+                self.blood_burst(e.pos, 90, 420)
+                for _ in range(4):
+                    self.splat(e.pos + V2(random.uniform(-40, 40), random.uniform(-40, 40)))
+                self.shake = 20
+                self.banner = ("Chefe derrotado!", 3.0)
 
     def aoe(self, center, radius, dmg, knock, stun, color):
         self.add_fx("ring", center, 0, radius, 0.3, color)
@@ -958,9 +1305,14 @@ class Game:
         dogs = 0 if n == 1 else min(8, n)
         self.spawn_q = ["sword"] * swords + ["gun"] * guns + ["dog"] * dogs
         random.shuffle(self.spawn_q)
+        if n % 5 == 0:  # onda de chefe: o gigante entra primeiro, com poucos acompanhantes
+            k = n // 5
+            escort = ["sword"] * (2 + 2 * k) + ["gun"] * (1 + k) + ["dog"] * (2 * k)
+            random.shuffle(escort)
+            self.spawn_q = ["boss"] + escort
         self.spawn_t = 1.0
         self.announced = False
-        self.banner = ("Onda %d" % n, 2.5)
+        self.banner = (("Onda %d — CHEFE!" % n) if n % 5 == 0 else ("Onda %d" % n), 3.0 if n % 5 == 0 else 2.5)
 
     def spawn_enemy(self, kind):
         p = self.player.pos
@@ -972,7 +1324,10 @@ class Game:
                 break
         if pos is None:
             pos = V2(120, 120)
-        self.enemies.append(Enemy(kind, pos))
+        if kind == "boss":
+            self.enemies.append(Boss(pos, 450 + 40 * self.wave))
+        else:
+            self.enemies.append(Enemy(kind, pos))
 
     def update_waves(self, dt):
         if self.spawn_q:
@@ -1017,7 +1372,9 @@ class Game:
         for t in due:
             t[1]()
 
+        self.update_hazards(dt)
         self.player.update(self, dt, move)
+        self.try_auto_cast()
         self.update_waves(dt)
         self.plan_ai(dt)
         for e in self.enemies:
@@ -1126,6 +1483,20 @@ class Game:
             e.slot_angle = front + math.radians(60 + 240 * (k + 0.5) / len(guns))
             e.ring_r = 340 + 45 * (k % 2)
 
+    def update_hazards(self, dt):
+        for h in self.hazards:
+            h["t"] -= dt
+            if h["t"] <= 0 and not h["done"]:
+                h["done"] = True
+                self.add_fx("ring", h["pos"], 0, h["r"], 0.35, (255, 150, 60))
+                self.add_fx("disc", h["pos"], 0, h["r"], 0.18, (255, 120, 50))
+                self.dust(h["pos"], 10)
+                self.shake = max(self.shake, 9)
+                pl = self.player
+                if (pl.pos - h["pos"]).length() < h["r"] + pl.r:
+                    self.hurt_player(h["dmg"], h["pos"], knock=380)
+        self.hazards = [h for h in self.hazards if not h["done"]]
+
     def separate_enemies(self):
         es = self.enemies
         for i in range(len(es)):
@@ -1134,16 +1505,20 @@ class Game:
             dl = d.length()
             minimum = a.r + self.player.r + 4
             if 0 < dl < minimum:
-                a.pos += d / dl * (minimum - dl)
+                if a.kind == "boss":
+                    self.player.pos -= d / dl * (minimum - dl)
+                else:
+                    a.pos += d / dl * (minimum - dl)
             for j in range(i + 1, len(es)):
                 b = es[j]
                 dd = b.pos - a.pos
                 dist = dd.length()
                 lim = a.r + b.r
                 if 0 < dist < lim:
-                    push = dd / dist * (lim - dist) * 0.5
-                    a.pos -= push
-                    b.pos += push
+                    push = dd / dist * (lim - dist)
+                    total = a.mass + b.mass
+                    a.pos -= push * (b.mass / total)
+                    b.pos += push * (a.mass / total)
 
     def follow_camera(self, dt):
         target = self.player.pos - V2(W / 2, H / 2)
@@ -1192,6 +1567,16 @@ class Game:
                 pygame.draw.circle(ov, col, sp, r, 5)
             elif f["k"] == "disc":
                 pygame.draw.circle(ov, (*f["col"], int(120 * k)), sp, f["r"])
+        for h in self.hazards:
+            if h["t"] <= BOSS_RAIN_TELEGRAPH:
+                k = 1 - max(0.0, h["t"]) / BOSS_RAIN_TELEGRAPH
+                sp = h["pos"] - cam
+                pygame.draw.circle(ov, (255, 50, 40, 40 + int(100 * k)), sp, h["r"])
+                pygame.draw.circle(ov, (255, 90, 60, 220), sp, h["r"], 3)
+                pygame.draw.circle(ov, (255, 220, 150, 220), sp, max(4, int(h["r"] * k)), 3)
+        for e in self.enemies:
+            if e.kind == "boss":
+                e.draw_telegraph(ov, cam)
         s.blit(ov, (0, 0))
 
         for tx in self.texts:
@@ -1241,7 +1626,27 @@ class Game:
             for i in range(len(p.mouth)):
                 pygame.draw.circle(s, (255, 150, 40), (x + 62 + i * 20, y + h + 20), 7)
                 pygame.draw.circle(s, (255, 235, 150), (x + 62 + i * 20, y + h + 20), 3)
-            draw_text(s, "botão dir. sem elementos: cuspir de volta", 14, (230, 200, 160), (x + 62 + 3 * 20 + 6, y + h + 12))
+            draw_text(s, "ESPAÇO com a fila vazia: cuspir de volta", 14, (230, 200, 160), (x + 62 + 3 * 20 + 6, y + h + 12))
+
+        # barra do chefe (vida + habilidade)
+        for e in self.enemies:
+            if e.kind != "boss":
+                continue
+            bw, bx0, by0 = 640, W / 2 - 320, H - 126
+            draw_text(s, "GIGANTE", 18, (255, 225, 215), (W / 2, by0 - 6), "midbottom", True)
+            pygame.draw.rect(s, (20, 6, 10), (bx0 - 3, by0 - 3, bw + 6, 22), border_radius=6)
+            pygame.draw.rect(s, (64, 14, 22), (bx0, by0, bw, 16), border_radius=4)
+            pygame.draw.rect(s, (214, 54, 62) if not e.enraged else (255, 90, 60), (bx0, by0, int(bw * max(0, e.hp) / e.max_hp), 16), border_radius=4)
+            pygame.draw.rect(s, (230, 200, 205), (bx0, by0, bw, 16), 2, border_radius=4)
+            sy0 = by0 + 24
+            full = e.special >= 99.5 or e.attack == "rain"
+            pygame.draw.rect(s, (30, 20, 48), (bx0, sy0, bw, 10), border_radius=4)
+            fill = 1.0 if full else e.special / 100
+            scol = (255, 200, 90) if full and int(self.time * 8) % 2 == 0 else (170, 110, 240)
+            pygame.draw.rect(s, scol, (bx0, sy0, int(bw * fill), 10), border_radius=4)
+            pygame.draw.rect(s, (200, 180, 230), (bx0, sy0, bw, 10), 1, border_radius=4)
+            draw_text(s, "HABILIDADE: Chuva de Socos", 13, (215, 195, 245), (bx0 + bw, sy0 + 12), "topright")
+            break
 
         # info da onda
         draw_text(s, "Onda %d" % self.wave, 22, (255, 235, 235), (W - 24, 20), "topright", True)
@@ -1284,13 +1689,13 @@ class Game:
         if p.bat:
             draw_text(s, "BOTÃO DIR.: morder   WASD: voar   P: pausa", 14, (180, 165, 185), (W / 2, H - 12), "midbottom")
         else:
-            items = [(LEG, "SHIFT"), (ARM, "BOTÃO ESQ."), (TOOTH, "ESPAÇO")]
+            items = [(TOOTH, "SHIFT"), (ARM, "BOTÃO ESQ."), (LEG, "BOTÃO DIR.")]
             bx = W / 2 - 330
             for e, k in items:
                 draw_icon(s, e, (bx + 14, by), 20)
                 draw_text(s, "%s: %s" % (k, ELEM_LABEL[e]), 15, (225, 210, 220), (bx + 34, by), "midleft")
                 bx += 190
-            draw_text(s, "BOTÃO DIR.: lançar   Q: limpar   P: pausa", 14, (180, 165, 185), (W / 2, H - 12), "midbottom")
+            draw_text(s, "Barra cheia lança sozinha   ESPAÇO: lançar já   Q: limpar   P: pausa", 14, (180, 165, 185), (W / 2, H - 12), "midbottom")
 
         if self.banner[1] > 0:
             k = min(1.0, self.banner[1])
@@ -1309,9 +1714,10 @@ class Game:
         draw_text(s, "O sangue é a sua vida — e o seu relógio. Cause dano para se manter de pé (ele pausa entre as ondas).", 20, (235, 215, 220), (W / 2, 168), "midtop")
         col1 = [
             "MOVER: W A S D        MIRAR: mouse",
-            "SHIFT = perna     BOTÃO ESQUERDO = braço     ESPAÇO = dente",
-            "Empilhe até 3 elementos e lance com o BOTÃO DIREITO (Q limpa).",
+            "SHIFT = dente     BOTÃO ESQUERDO = braço     BOTÃO DIREITO = perna",
+            "Com 3 elementos a barra enche e a habilidade é lançada sozinha. ESPAÇO lança antes (Q limpa).",
             "O 1º elemento define a ação; repetir fortalece; misturar faz as duas coisas.",
+            "A cada 5 ondas surge um GIGANTE: fuja das áreas vermelhas no chão.",
         ]
         for i, t in enumerate(col1):
             draw_text(s, t, 18, (245, 235, 240), (W / 2, 218 + i * 26), "midtop")
@@ -1325,12 +1731,12 @@ class Game:
             ("braço + dente", "soco com dente em área"),
             ("dente + perna", "cospe a perna; se acertar, pula até o inimigo"),
             ("dente + braço", "arremessa o braço como bumerangue"),
-            ("dente, dente, dente", "PARRY: come o tiro que vem (botão dir. p/ devolver)"),
+            ("dente, dente, dente", "PARRY: come o tiro que vem (ESPAÇO p/ devolver)"),
         ]
-        y0 = 340
+        y0 = 356
         for i, (k, d) in enumerate(combos):
-            draw_text(s, k, 17, (255, 205, 150), (W / 2 - 20, y0 + i * 25), "topright", True)
-            draw_text(s, d, 17, (230, 220, 225), (W / 2 + 0, y0 + i * 25), "topleft")
+            draw_text(s, k, 17, (255, 205, 150), (W / 2 - 20, y0 + i * 24), "topright", True)
+            draw_text(s, d, 17, (230, 220, 225), (W / 2 + 0, y0 + i * 24), "topleft")
         draw_text(s, "Sangue cheio = FRENESI. Sangue zerado = MORCEGO (só morde; 1 golpe e acabou; mate um inimigo para voltar).", 17, (255, 160, 170), (W / 2, 612), "midtop")
         blink = int(pygame.time.get_ticks() / 500) % 2 == 0
         if blink:
@@ -1369,7 +1775,12 @@ def main():
     pygame.mouse.set_visible(False)
     clock = pygame.time.Clock()
     game = Game()
-    elem_keys = {pygame.K_LSHIFT: LEG, pygame.K_RSHIFT: LEG, pygame.K_SPACE: TOOTH}
+    if "--wave" in sys.argv:  # atalho para testar ondas altas / o chefe: python3 main.py --wave 5
+        try:
+            game.first_wave = max(1, int(sys.argv[sys.argv.index("--wave") + 1]))
+        except (IndexError, ValueError):
+            pass
+    elem_keys = {pygame.K_LSHIFT: TOOTH, pygame.K_RSHIFT: TOOTH}
 
     while True:
         dt = min(clock.tick(FPS) / 1000.0, 0.05)
@@ -1390,6 +1801,8 @@ def main():
                     elif ev.key == pygame.K_ESCAPE:
                         pygame.quit()
                         sys.exit()
+                elif ev.key == pygame.K_SPACE:
+                    game.space_action()
                 elif ev.key in elem_keys:
                     game.add_element(elem_keys[ev.key])
                 elif ev.key == pygame.K_q:
@@ -1400,7 +1813,7 @@ def main():
                 elif ev.button == 1:
                     game.add_element(ARM)
                 elif ev.button == 3:
-                    game.cast()
+                    game.right_click()
 
         keys = pygame.key.get_pressed()
         move = V2(keys[pygame.K_d] - keys[pygame.K_a], keys[pygame.K_s] - keys[pygame.K_w])
