@@ -2,6 +2,7 @@
 
 Uso: python tests/test_smoke.py
 """
+import math
 import os
 import sys
 
@@ -242,6 +243,107 @@ def test_bat_blood_does_not_drain_or_heal():
     g.player.add_blood(50, g)
     step(g, 60)
     assert g.player.blood == 0 and g.player.bat
+
+
+def _no_damage(g):
+    g.player.invuln = 99
+
+
+def test_swords_hold_ring_and_keep_spacing():
+    g = fresh()
+    g.wave = 1
+    for i in range(8):
+        ang = i * 0.7
+        g.enemies.append(Enemy("sword", g.player.pos + V2(500, 0).rotate_rad(ang)))
+    for _ in range(60 * 7):
+        _no_damage(g)
+        g.update(DT, V2())
+    near = [e for e in g.enemies if (e.pos - g.player.pos).length() < 75]
+    assert len(near) <= 4, "so poucos espadachins atacam ao mesmo tempo (%d)" % len(near)
+    assert any(e.role == "ring" for e in g.enemies), "o resto fica rondando em anel"
+    es = g.enemies
+    closest = min((a.pos - b.pos).length() for i, a in enumerate(es) for b in es[i + 1:])
+    assert closest > 24, "inimigos nao devem se amontoar (%.1f)" % closest
+
+
+def test_swords_flank_behind_player():
+    g = fresh()  # a vampira mira para a direita (+x)
+    g.wave = 1
+    for i in range(6):
+        g.enemies.append(Enemy("sword", g.player.pos + V2(420, -150 + i * 60)))
+    for _ in range(60 * 9):
+        _no_damage(g)
+        g.update(DT, V2())
+    assert any(e.role == "flank" for e in g.enemies)
+    behind = [e for e in g.enemies if e.pos.x < g.player.pos.x - 20]
+    assert behind, "alguem deve ter contornado e chegado por tras"
+
+
+def test_dog_lunges_and_hits():
+    g = fresh()
+    dog = Enemy("dog", g.player.pos + V2(-230, 0))
+    dog.cd = 0
+    g.enemies.append(dog)
+    hits = []
+    orig = g.hurt_player
+    g.hurt_player = lambda dmg, src: (hits.append(dmg), orig(dmg, src))[1]
+    seen = set()
+    for _ in range(60 * 6):
+        g.player.blood = 60
+        g.update(DT, V2())
+        seen.add(dog.state)
+        if hits:
+            break
+    assert {"windup", "lunge"} <= seen, "cachorro avisa e avanca em bote (%s)" % seen
+    assert hits and hits[0] == 9
+
+
+def test_dog_lunge_can_be_dodged_with_dash():
+    g = fresh()
+    dog = Enemy("dog", g.player.pos + V2(-200, 0))
+    dog.cd = 0
+    g.enemies.append(dog)
+    hits = []
+    g.hurt_player = lambda dmg, src: hits.append(dmg)
+    g.mouse = g.player.pos + V2(0, 300)
+    for _ in range(60 * 3):
+        g.player.blood = 60
+        g.update(DT, V2())
+        if dog.state == "lunge":
+            cast(g, LEG)
+            break
+    step(g, 40)
+    # o dash tirou a vampira da linha do bote (a trajetoria era travada no inicio do bote)
+    assert not hits, "o dash tira a vampira da linha do bote"
+
+
+def test_gunner_line_of_fire_and_slots():
+    g = fresh()
+    gun = Enemy("gun", g.player.pos + V2(400, 0))
+    ally = Enemy("sword", g.player.pos + V2(200, 4))
+    g.enemies += [gun, ally]
+    assert g.line_blocked(gun), "aliado no meio bloqueia o tiro"
+    ally.pos = g.player.pos + V2(200, 120)
+    assert not g.line_blocked(gun)
+    guns = [Enemy("gun", g.player.pos + V2(500, i * 40)) for i in range(3)]
+    g.enemies += guns
+    g.ai_t = 0
+    g.plan_ai(DT)
+    angles = sorted(round(e.slot_angle % math.tau, 2) for e in guns + [gun])
+    assert len(set(angles)) == len(angles), "atiradores ocupam posicoes diferentes"
+
+
+def test_gunners_do_not_fire_all_at_once():
+    g = fresh()
+    guns = [Enemy("gun", g.player.pos + V2(380, i * 90 - 135)) for i in range(4)]
+    for e in guns:
+        e.cd = 0
+    g.enemies += guns
+    g.ai_t = 0
+    for _ in range(int(0.45 / DT)):
+        _no_damage(g)
+        g.update(DT, V2())
+    assert sum(1 for e in guns if e.windup > 0) <= 1, "tiros escalonados, nao uma salva"
 
 
 def test_render_all_states():

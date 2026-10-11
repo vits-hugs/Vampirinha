@@ -78,9 +78,18 @@ Regras de fila:
 
 ## Inimigos
 
-- **Espadachim**: corre até você e golpeia depois de um breve aviso (dá tempo de desviar ou dar dash).
-- **Atirador**: mantém distância, mira com um laser vermelho e atira. O tiro dele pode ser comido no parry.
-- As ondas crescem a cada rodada, com mais espadachins e atiradores.
+Eles agem em grupo: um coordenador distribui papéis a cada 0,25 s e todos mantêm distância uns dos outros.
+
+- **Espadachim**: só alguns atacam por vez (2 a 4, conforme a onda). Um ou dois vão pela frente, **dois
+  flanqueiam** (contornam você em arco e atacam pelas costas, em relação a onde você está mirando) e o resto
+  **ronda em anel** esperando uma vaga. Todo golpe tem um aviso curto (dá tempo de desviar ou dar dash).
+- **Atirador**: mantém distância, **abre fogo cruzado** posicionando-se pelos lados e por trás, recua se você
+  chega perto, **não atira com um aliado na linha de tiro** (troca de posição) e **escalona os tiros** em vez de
+  disparar todos juntos. Mira com um laser vermelho e leva em conta o seu movimento. O tiro pode ser comido no parry.
+- **Cachorro** (a partir da onda 2): rápido e frágil. Circula pela retaguarda, **agacha com um aviso** e dá um
+  **bote em linha reta** (9 de dano). A trajetória é travada no início do bote, então um dash de lado desvia.
+  No máximo 2 cachorros dão o bote ao mesmo tempo.
+- As ondas crescem a cada rodada, com mais inimigos de cada tipo.
 
 ## Estrutura
 

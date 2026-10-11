@@ -33,7 +33,7 @@ LIFESTEAL = 0.45              # fração do dano causado que vira sangue
 FRENZY_SPEED = 1.35
 FRENZY_DAMAGE = 1.5
 PARRY_RADIUS = 230
-MAX_ALIVE = 26
+MAX_ALIVE = 30
 
 TOOTH_PTS = [(-0.5, -0.5), (0.5, -0.5), (0.45, 0.1), (0.2, 0.6), (0, 0.15), (-0.2, 0.6), (-0.45, 0.1)]
 ARM_PTS = [(-0.6, -0.18), (0.2, -0.18), (0.2, -0.32), (0.62, -0.32), (0.62, 0.32), (0.2, 0.32), (0.2, 0.18), (-0.6, 0.18)]
@@ -207,7 +207,27 @@ class Proj:
             pygame.draw.circle(s, (255, 210, 90), sp, self.r)
 
 
+def wrap_angle(a):
+    return (a + math.pi) % math.tau - math.pi
+
+
+def ellipse_pts(center, rx, ry, ang, n=16):
+    c, s = math.cos(ang), math.sin(ang)
+    pts = []
+    for i in range(n):
+        t = math.tau * i / n
+        x, y = rx * math.cos(t), ry * math.sin(t)
+        pts.append((center[0] + x * c - y * s, center[1] + x * s + y * c))
+    return pts
+
+
 class Enemy:
+    """Inimigos: 'sword' (espadachim), 'gun' (atirador) e 'dog' (cachorro).
+
+    O papel (role) e a posição desejada (slot_angle / ring_r) são decididos pelo
+    coordenador Game.plan_ai; aqui cada inimigo só executa o comportamento.
+    """
+
     def __init__(self, kind, pos):
         self.kind = kind
         self.pos = V2(pos)
@@ -216,6 +236,10 @@ class Enemy:
             self.hp = self.max_hp = 34
             self.speed = random.uniform(88, 112)
             self.r = 16
+        elif kind == "dog":
+            self.hp = self.max_hp = 18
+            self.speed = random.uniform(190, 215)
+            self.r = 12
         else:
             self.hp = self.max_hp = 24
             self.speed = random.uniform(66, 80)
@@ -228,7 +252,47 @@ class Enemy:
         self.facing = 0.0
         self.dead = False
         self.strafe = random.choice((-1, 1))
+        # tática
+        self.role = "ring"          # sword: engage | flank | ring ; dog/gun: ring
+        self.slot_angle = random.uniform(0, math.tau)
+        self.ring_r = 240.0
+        self.state = "circle"       # cachorro: circle | windup | lunge | recover
+        self.t = 0.0
+        self.hit_done = False
 
+    # ---- movimento tático
+    def steer(self, g, target, speed, dt, sep_r=70):
+        """Anda até target mantendo distância dos outros inimigos."""
+        to = target - self.pos
+        d = to.length()
+        v = to / d if d > 1e-3 else V2()
+        push = V2()
+        for o in g.enemies:
+            if o is self or o.dead:
+                continue
+            dd = self.pos - o.pos
+            dl = dd.length()
+            rad = sep_r if o.kind == self.kind else min(sep_r, 60)
+            if 0 < dl < rad:
+                push += dd / dl * (1 - dl / rad)
+        v += push * 1.6
+        n = v.length()
+        if n > 1e-3:
+            slow = min(1.0, d / 25) if d < 25 else 1.0
+            self.pos += v / n * speed * slow * dt
+
+    def orbit_target(self, g, target_angle, ring_r, final_r):
+        """Contorna o jogador em arco (sem passar pela frente dele) até o ângulo desejado."""
+        p = g.player.pos
+        rel = self.pos - p
+        cur = math.atan2(rel.y, rel.x)
+        diff = wrap_angle(target_angle - cur)
+        if abs(diff) > 0.55:
+            a = cur + (0.45 if diff > 0 else -0.45)
+            return p + V2(math.cos(a), math.sin(a)) * ring_r
+        return p + V2(math.cos(target_angle), math.sin(target_angle)) * final_r
+
+    # ---- atualização
     def update(self, g, dt):
         self.flash = max(0.0, self.flash - dt)
         self.pos += self.vel * dt
@@ -238,82 +302,177 @@ class Enemy:
         if self.stun > 0:
             self.stun -= dt
             self.windup = 0
+            if self.kind == "dog":
+                self.state = "circle"
+                self.cd = max(self.cd, 0.5)
             return
         to = g.player.pos - self.pos
         d = to.length() or 0.001
         dirv = to / d
-        self.facing = math.atan2(dirv.y, dirv.x)
+        if not (self.kind == "dog" and self.state == "lunge"):
+            self.facing = math.atan2(dirv.y, dirv.x)
         self.cd -= dt
         if self.kind == "sword":
-            if self.windup > 0:
-                self.windup -= dt
-                if self.windup <= 0:
-                    g.add_fx("cone", self.pos, math.atan2(self.aim.y, self.aim.x), 78, 0.16, (235, 235, 245), arc=130)
-                    if in_cone(self.pos, math.atan2(self.aim.y, self.aim.x), g.player.pos, 78, 130, g.player.r):
-                        g.hurt_player(10, self.pos)
-                    self.cd = 1.1
-            elif d > 52:
-                self.pos += dirv * self.speed * dt
-            elif self.cd <= 0:
+            self.ai_sword(g, dt, d, dirv)
+        elif self.kind == "dog":
+            self.ai_dog(g, dt, d, dirv)
+        else:
+            self.ai_gun(g, dt, d, dirv)
+
+    def ai_sword(self, g, dt, d, dirv):
+        p = g.player.pos
+        if self.windup > 0:
+            self.windup -= dt
+            if self.windup <= 0:
+                ang = math.atan2(self.aim.y, self.aim.x)
+                g.add_fx("cone", self.pos, ang, 78, 0.16, (235, 235, 245), arc=130)
+                if in_cone(self.pos, ang, p, 78, 130, g.player.r):
+                    g.hurt_player(10, self.pos)
+                self.cd = random.uniform(1.0, 1.4)
+            return
+        if self.role == "ring":
+            tgt = p + V2(math.cos(self.slot_angle), math.sin(self.slot_angle)) * self.ring_r
+            self.steer(g, tgt, self.speed * 0.9, dt, 80)
+        elif self.role == "flank":
+            tgt = self.orbit_target(g, self.slot_angle, 240, 54)
+            self.steer(g, tgt, self.speed * 1.05, dt, 55)
+        elif d > 50:
+            self.steer(g, p, self.speed, dt, 70)
+        if self.role != "ring" and d < 56 and self.cd <= 0:
+            self.windup = 0.4
+            self.aim = dirv
+
+    def ai_dog(self, g, dt, d, dirv):
+        p = g.player.pos
+        if self.state == "windup":
+            self.windup -= dt
+            if self.windup > 0.1:
+                self.aim = dirv
+            if self.windup <= 0:
+                self.state = "lunge"
+                self.t = 0.45
+                self.hit_done = False
+                self.aim = norm(p + g.player.vel * 0.2 - self.pos)
+            return
+        if self.state == "lunge":
+            self.pos += self.aim * 560 * dt
+            self.facing = math.atan2(self.aim.y, self.aim.x)
+            self.t -= dt
+            if not self.hit_done and d < self.r + g.player.r + 12:
+                self.hit_done = True
+                g.hurt_player(9, self.pos)
+            if self.t <= 0:
+                self.state = "recover"
+                self.t = 0.7
+                self.cd = random.uniform(1.2, 2.0)
+            return
+        if self.state == "recover":
+            self.t -= dt
+            self.pos -= dirv * self.speed * 0.5 * dt
+            if self.t <= 0:
+                self.state = "circle"
+            return
+        tgt = self.orbit_target(g, self.slot_angle, 230, 190)
+        self.steer(g, tgt, self.speed, dt, 60)
+        if self.cd <= 0 and 90 < d < 260:
+            busy = sum(1 for e in g.enemies if e is not self and e.kind == "dog" and e.state in ("windup", "lunge"))
+            if busy < 2:
+                self.state = "windup"
                 self.windup = 0.4
                 self.aim = dirv
-        else:
-            if self.windup > 0:
-                self.windup -= dt
-                if self.windup > 0.15:
-                    self.aim = dirv
-                if self.windup <= 0:
-                    b = Proj("ebullet", self.pos + self.aim * 22, self.aim * 360, 8, 6, 3.2, friendly=False)
-                    g.ebullets.append(b)
-                    self.cd = random.uniform(1.8, 2.6)
-            else:
-                if d > 360:
-                    self.pos += dirv * self.speed * dt
-                elif d < 250:
-                    self.pos -= dirv * self.speed * 0.8 * dt
-                else:
-                    perp = V2(-dirv.y, dirv.x) * self.strafe
-                    self.pos += perp * self.speed * 0.45 * dt
-                if self.cd <= 0 and d < 640:
-                    self.windup = 0.5
-                    self.aim = dirv
 
+    def ai_gun(self, g, dt, d, dirv):
+        p = g.player.pos
+        if self.windup > 0:
+            self.windup -= dt
+            if self.windup > 0.15:  # mira com um pouco de antecipação do movimento
+                self.aim = norm(p + g.player.vel * 0.45 - self.pos)
+            if self.windup <= 0:
+                g.ebullets.append(Proj("ebullet", self.pos + self.aim * 22, self.aim * 360, 8, 6, 3.2, friendly=False))
+                self.cd = random.uniform(1.8, 2.6)
+            return
+        perp = V2(-dirv.y, dirv.x) * self.strafe
+        tgt = p + V2(math.cos(self.slot_angle), math.sin(self.slot_angle)) * self.ring_r
+        tgt.x = max(90, min(WORLD_W - 90, tgt.x))
+        tgt.y = max(90, min(WORLD_H - 90, tgt.y))
+        if d < 230:  # recua em diagonal
+            self.steer(g, self.pos + (-dirv + perp * 0.6) * 100, self.speed * 1.1, dt, 120)
+        elif (tgt - self.pos).length() > 30:
+            self.steer(g, tgt, self.speed, dt, 120)
+        else:
+            self.steer(g, self.pos + perp * 60, self.speed * 0.35, dt, 120)
+        if self.cd <= 0 and d < 650 and g.gun_cd <= 0:
+            if g.line_blocked(self):
+                self.strafe = -self.strafe  # aliado na frente: muda de posição em vez de atirar
+                self.cd = 0.35
+            else:
+                self.windup = 0.5
+                self.aim = norm(p + g.player.vel * 0.45 - self.pos)
+                g.gun_cd = 0.8
+
+    # ---- desenho
     def draw(self, s, cam):
         sp = self.pos - cam
         if not (-60 < sp.x < W + 60 and -60 < sp.y < H + 60):
             return
         pygame.draw.ellipse(s, (8, 6, 12), (sp.x - self.r, sp.y + self.r * 0.5, self.r * 2, self.r * 0.9))
         fl = self.flash > 0
-        if self.kind == "sword":
-            body, trim = ((255, 255, 255) if fl else (96, 110, 140)), (40, 48, 70)
+        if self.kind == "dog":
+            self.draw_dog(s, sp, fl)
         else:
-            body, trim = ((255, 255, 255) if fl else (140, 100, 70)), (60, 40, 25)
-        pygame.draw.circle(s, trim, sp, self.r + 2)
-        pygame.draw.circle(s, body, sp, self.r)
-        fv = V2(math.cos(self.facing), math.sin(self.facing))
-        pygame.draw.circle(s, (230, 200, 170), sp + fv * 5, 8)
-        pygame.draw.circle(s, (20, 20, 20), sp + fv * 9 + V2(-fv.y, fv.x) * 3, 2)
-        pygame.draw.circle(s, (20, 20, 20), sp + fv * 9 - V2(-fv.y, fv.x) * 3, 2)
-        if self.kind == "sword":
-            ang = math.atan2(self.aim.y, self.aim.x) if self.windup > 0 else self.facing
-            raise_ = 0.9 if self.windup > 0 else 0.0
-            base = sp + V2(math.cos(ang), math.sin(ang)) * 12
-            tip = sp + V2(math.cos(ang + raise_ * 0.6), math.sin(ang + raise_ * 0.6)) * 42
-            pygame.draw.line(s, (210, 215, 225), base, tip, 4)
-            if self.windup > 0:
-                pygame.draw.circle(s, (255, 60, 60), sp + V2(0, -self.r - 14), 5)
-        else:
-            gun_dir = self.aim if self.windup > 0 else fv
-            tip = sp + gun_dir * 30
-            pygame.draw.line(s, (40, 40, 45), sp + gun_dir * 8, tip, 6)
-            if self.windup > 0:
-                end = sp + gun_dir * 600
-                pygame.draw.line(s, (255, 70, 70), tip, end, 1)
-                pygame.draw.circle(s, (255, 60, 60), sp + V2(0, -self.r - 14), 5)
+            if self.kind == "sword":
+                body, trim = ((255, 255, 255) if fl else (96, 110, 140)), (40, 48, 70)
+            else:
+                body, trim = ((255, 255, 255) if fl else (140, 100, 70)), (60, 40, 25)
+            pygame.draw.circle(s, trim, sp, self.r + 2)
+            pygame.draw.circle(s, body, sp, self.r)
+            fv = V2(math.cos(self.facing), math.sin(self.facing))
+            pygame.draw.circle(s, (230, 200, 170), sp + fv * 5, 8)
+            pygame.draw.circle(s, (20, 20, 20), sp + fv * 9 + V2(-fv.y, fv.x) * 3, 2)
+            pygame.draw.circle(s, (20, 20, 20), sp + fv * 9 - V2(-fv.y, fv.x) * 3, 2)
+            if self.kind == "sword":
+                ang = math.atan2(self.aim.y, self.aim.x) if self.windup > 0 else self.facing
+                raise_ = 0.9 if self.windup > 0 else 0.0
+                base = sp + V2(math.cos(ang), math.sin(ang)) * 12
+                tip = sp + V2(math.cos(ang + raise_ * 0.6), math.sin(ang + raise_ * 0.6)) * 42
+                pygame.draw.line(s, (210, 215, 225), base, tip, 4)
+                if self.windup > 0:
+                    pygame.draw.circle(s, (255, 60, 60), sp + V2(0, -self.r - 14), 5)
+            else:
+                gun_dir = self.aim if self.windup > 0 else fv
+                tip = sp + gun_dir * 30
+                pygame.draw.line(s, (40, 40, 45), sp + gun_dir * 8, tip, 6)
+                if self.windup > 0:
+                    pygame.draw.line(s, (255, 70, 70), tip, sp + gun_dir * 600, 1)
+                    pygame.draw.circle(s, (255, 60, 60), sp + V2(0, -self.r - 14), 5)
         if self.hp < self.max_hp:
             w = 34
             pygame.draw.rect(s, (30, 10, 14), (sp.x - w / 2, sp.y - self.r - 10, w, 5))
             pygame.draw.rect(s, (200, 40, 50), (sp.x - w / 2, sp.y - self.r - 10, w * max(0, self.hp) / self.max_hp, 5))
+
+    def draw_dog(self, s, sp, fl):
+        fv = V2(math.cos(self.facing), math.sin(self.facing))
+        perp = V2(-fv.y, fv.x)
+        stretch = 1.3 if self.state == "lunge" else (0.82 if self.state == "windup" else 1.0)
+        body = (255, 255, 255) if fl else (156, 110, 66)
+        dark = (88, 56, 34)
+        phase = pygame.time.get_ticks() / 70.0
+        for i, (fo, side) in enumerate(((9, 1), (9, -1), (-9, 1), (-9, -1))):
+            sw = math.sin(phase + i * 1.6) * 4 if self.state in ("circle", "lunge") else 0
+            pygame.draw.circle(s, dark, sp + fv * (fo * stretch + sw) + perp * side * 6, 3)
+        pygame.draw.polygon(s, dark, ellipse_pts(sp, 17 * stretch, 9.5, self.facing))
+        pygame.draw.polygon(s, body, ellipse_pts(sp, 15 * stretch, 7.5, self.facing))
+        tail_end = sp - fv * 24 * stretch + perp * math.sin(phase * 0.7) * 5
+        pygame.draw.line(s, dark, sp - fv * 13 * stretch, tail_end, 3)
+        head = sp + fv * 15 * stretch
+        pygame.draw.circle(s, dark, head, 8)
+        pygame.draw.circle(s, body, head, 6.5)
+        pygame.draw.circle(s, dark, head + fv * 6, 3)
+        for side in (1, -1):
+            pygame.draw.polygon(s, dark, [head - fv * 2 + perp * side * 4, head - fv * 7 + perp * side * 8, head - fv * 5 + perp * side * 1])
+            pygame.draw.circle(s, (20, 14, 10), head + fv * 2 + perp * side * 3, 1.5)
+        if self.state == "windup":
+            pygame.draw.circle(s, (255, 60, 60), sp + V2(0, -self.r - 14), 5)
 
 
 class Player:
@@ -531,6 +690,9 @@ class Game:
         self.spawn_q = []
         self.spawn_t = 0.0
         self.break_t = 1.5
+        self.ai_t = 0.0
+        self.ai_aim = 0.0
+        self.gun_cd = 0.0
         self.announced = True
         self.banner = ("", 0.0)
         self.camera = self.player.pos - V2(W / 2, H / 2)
@@ -793,7 +955,8 @@ class Game:
         self.wave = n
         swords = 3 + 3 * n
         guns = 0 if n == 1 else min(10, n + 1)
-        self.spawn_q = ["sword"] * swords + ["gun"] * guns
+        dogs = 0 if n == 1 else min(8, n)
+        self.spawn_q = ["sword"] * swords + ["gun"] * guns + ["dog"] * dogs
         random.shuffle(self.spawn_q)
         self.spawn_t = 1.0
         self.announced = False
@@ -856,6 +1019,7 @@ class Game:
 
         self.player.update(self, dt, move)
         self.update_waves(dt)
+        self.plan_ai(dt)
         for e in self.enemies:
             e.update(self, dt)
         self.separate_enemies()
@@ -891,6 +1055,76 @@ class Game:
         self.ebullets = [b for b in self.ebullets if not b.dead]
         self.enemies = [e for e in self.enemies if not e.dead]
         self.follow_camera(dt)
+
+
+    # ---- IA tática (coordena os papéis; cada Enemy executa o seu)
+    def line_blocked(self, shooter):
+        """Há um aliado no caminho entre o atirador e o jogador?"""
+        a = shooter.pos
+        ab = self.player.pos - a
+        L2 = ab.length_squared()
+        if L2 < 1:
+            return False
+        for o in self.enemies:
+            if o is shooter or o.dead:
+                continue
+            t = (o.pos - a).dot(ab) / L2
+            if 0 < t < 1 and (o.pos - (a + ab * t)).length() < o.r + 10:
+                return True
+        return False
+
+    def plan_ai(self, dt):
+        self.gun_cd = max(0.0, self.gun_cd - dt)
+        self.ai_t -= dt
+        if self.ai_t > 0:
+            return
+        self.ai_t = 0.25
+        p = self.player.pos
+        # "frente" do jogador (para onde ele mira), suavizada para a formação não tremer
+        self.ai_aim += wrap_angle(self.player.facing - self.ai_aim) * 0.35
+        front = self.ai_aim
+
+        def rel(e):
+            d = e.pos - p
+            return (math.atan2(d.y, d.x) - front) % math.tau
+
+        def dist(e):
+            return (e.pos - p).length()
+
+        live = [e for e in self.enemies if not e.dead]
+        swords = sorted((e for e in live if e.kind == "sword"), key=dist)
+        n = len(swords)
+        if n:
+            max_att = min(4, 2 + self.wave // 3)
+            n_flank = min(2, max(0, n - 2))
+            n_engage = max(1, min(n - n_flank, max_att - n_flank))
+            engage, rest = swords[:n_engage], swords[n_engage:]
+            for e in engage:
+                e.role = "engage"
+            # os flanqueadores são os que já estão mais perto de "atrás" do jogador
+            rest.sort(key=lambda e: abs(wrap_angle(rel(e) - math.pi)))
+            flankers, ring = rest[:n_flank], rest[n_flank:]
+            flankers.sort(key=rel)
+            for i, e in enumerate(flankers):
+                e.role = "flank"
+                off = 0.0 if len(flankers) == 1 else (-0.95 if i == 0 else 0.95)
+                e.slot_angle = front + math.pi + off
+            ring.sort(key=rel)
+            if ring:
+                base = front + rel(ring[0]) + self.time * 0.15
+                for k, e in enumerate(ring):
+                    e.role = "ring"
+                    e.slot_angle = base + math.tau * k / len(ring)
+                    e.ring_r = 235 + 35 * (k % 2)
+
+        dogs = sorted((e for e in live if e.kind == "dog"), key=rel)
+        for k, e in enumerate(dogs):  # cachorros espalhados pela retaguarda
+            e.slot_angle = front + math.radians(100 + 160 * (k + 0.5) / len(dogs))
+
+        guns = sorted((e for e in live if e.kind == "gun"), key=rel)
+        for k, e in enumerate(guns):  # atiradores abrem fogo cruzado pelos lados e por trás
+            e.slot_angle = front + math.radians(60 + 240 * (k + 0.5) / len(guns))
+            e.ring_r = 340 + 45 * (k % 2)
 
     def separate_enemies(self):
         es = self.enemies
