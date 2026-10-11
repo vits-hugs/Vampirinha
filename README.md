@@ -15,13 +15,24 @@ Para rodar na mão: `pip install -r requirements.txt && python3 main.py` (precis
 
 ## A barra de sangue
 
-- Começa pela **metade** e **desce sozinha** com o tempo.
+- Começa pela **metade** e **desce sozinha** com o tempo, mas **fica parada entre as ondas**
+  (quando não há nenhum inimigo vivo ou por nascer).
 - Tomar dano (espada: 10, tiro: 8) também faz ela descer.
 - **Causar dano recupera sangue** (45% do dano causado).
 - Se **enche por completo**, entra em **FRENESI**: ~35% mais rápida, ataques com +50% de dano e
   recarga 30% menor. No frenesi a barra vira um cronômetro e esvazia rápido (ainda dá para
   prolongá-lo acertando inimigos). Quando ela cai até 30, o frenesi termina.
-- Se zerar fora do frenesi, acabou.
+- Se zerar fora do frenesi, ela **vira um morcego** (veja abaixo).
+
+## Forma de morcego
+
+Quando o sangue acaba, a vampira se transforma em morcego:
+
+- Só tem **um ataque: morder**, no **botão direito** (bote curto para a frente, em arco).
+- Voa mais rápido, mas **1 golpe e morre** (fim de jogo). Ao se transformar ela ganha só um respiro de
+  0,6 s sem poder ser atingida.
+- O sangue fica congelado em zero e não dá para usar elementos.
+- **Matar um inimigo** devolve a forma normal, com 35% de sangue e 1 s de proteção.
 
 ## Controles
 
@@ -30,10 +41,11 @@ Para rodar na mão: `pip install -r requirements.txt && python3 main.py` (precis
 | Andar | `W` `A` `S` `D` |
 | Mirar | mouse |
 | Elemento **perna** | `Shift` |
-| Elemento **braço** | botão direito do mouse |
+| Elemento **braço** | botão esquerdo do mouse |
 | Elemento **dente** | `Espaço` |
-| **Lançar** o que está na fila | botão esquerdo do mouse (na direção do ponteiro) |
+| **Lançar** o que está na fila | botão direito do mouse (na direção do ponteiro) |
 | Limpar a fila | `Q` |
+| **Morder** (só na forma de morcego) | botão direito do mouse |
 | Pausa | `P` ou `Esc` |
 | Tela cheia | `F11` |
 

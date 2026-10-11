@@ -44,6 +44,7 @@ def cast(g, *elems):
 
 def test_blood_drain_and_hit_heals():
     g = fresh()
+    g.enemies.append(Enemy("sword", g.player.pos + V2(900, 900)))  # com inimigos vivos o sangue escorre
     b0 = g.player.blood
     step(g, 60)
     assert g.player.blood < b0, "sangue deve cair com o tempo"
@@ -183,6 +184,66 @@ def test_waves_and_enemies_attack():
     assert g.state == "over" or g.player.blood < vamp.BLOOD_START
 
 
+def test_blood_paused_between_waves():
+    g = Game()
+    g.start()
+    g.break_t = 999
+    g.enemies.clear()
+    g.spawn_q = []
+    assert g.resting()
+    b = g.player.blood
+    step(g, 120)
+    assert g.player.blood == b, "sangue nao deve cair entre as ondas"
+    g.enemies.append(Enemy("sword", g.player.pos + V2(900, 0)))
+    step(g, 60)
+    assert g.player.blood < b, "sangue volta a cair com inimigos vivos"
+
+
+def test_bat_form_and_bite_revert():
+    g = fresh()
+    far = Enemy("sword", g.player.pos + V2(900, 900))
+    e = Enemy("sword", g.player.pos + V2(45, 0))
+    e.hp = 10
+    g.enemies += [far, e]
+    g.player.blood = 0.5
+    g.player.queue = [TOOTH]
+    step(g, 60)
+    p = g.player
+    assert p.bat and g.state == "play", "sem sangue vira morcego"
+    assert not p.queue
+    g.add_element(ARM)
+    assert not p.queue, "morcego nao usa elementos"
+    b = p.blood
+    g.cast()  # morder
+    assert not p.bat, "matar com a mordida volta a forma normal"
+    assert p.blood > b and e.dead
+
+
+def test_bat_dies_in_one_hit():
+    g = fresh()
+    g.enemies.append(Enemy("sword", g.player.pos + V2(900, 900)))
+    g.become_bat()
+    g.player.invuln = 0
+    g.hurt_player(8, g.player.pos + V2(30, 0))
+    assert g.state == "over"
+
+
+def test_human_hit_to_zero_becomes_bat():
+    g = fresh()
+    g.player.blood = 5
+    g.hurt_player(10, g.player.pos + V2(30, 0))
+    assert g.player.bat and g.state == "play"
+
+
+def test_bat_blood_does_not_drain_or_heal():
+    g = fresh()
+    g.enemies.append(Enemy("sword", g.player.pos + V2(900, 900)))
+    g.become_bat()
+    g.player.add_blood(50, g)
+    step(g, 60)
+    assert g.player.blood == 0 and g.player.bat
+
+
 def test_render_all_states():
     g = Game()
     for st in ("menu", "play", "pause", "over"):
@@ -192,6 +253,8 @@ def test_render_all_states():
             step(g, 120)
             cast(g, ARM, TOOTH)
             cast(g, LEG, TOOTH)
+            g.become_bat()
+            g.draw(screen, (600, 300))
         g.state = st
         g.draw(screen, (600, 300))
     pygame.image.save(screen, os.path.join(os.path.dirname(__file__), "_last_frame.png"))

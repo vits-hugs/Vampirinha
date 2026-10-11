@@ -27,7 +27,9 @@ BLOOD_START = 50.0
 BLOOD_DRAIN = 2.2              # sangue perdido por segundo
 FRENZY_DRAIN = 10.0            # no frenesi a barra vira um cronômetro
 FRENZY_END = 30.0              # o frenesi acaba quando a barra cai até aqui
-LIFESTEAL = 0.45               # fração do dano causado que vira sangue
+BAT_REVERT_BLOOD = 35.0        # sangue ao voltar da forma de morcego
+BAT_BITE_DAMAGE = 16
+LIFESTEAL = 0.45              # fração do dano causado que vira sangue
 FRENZY_SPEED = 1.35
 FRENZY_DAMAGE = 1.5
 PARRY_RADIUS = 230
@@ -328,8 +330,11 @@ class Player:
         self.mouth = []          # tiros "comidos" no parry
         self.dash = None
         self.facing = 0.0
+        self.bat = False         # sem sangue: vira morcego (só morde, morre com 1 golpe)
 
     def add_blood(self, amount, g):
+        if self.bat:
+            return
         self.blood = min(BLOOD_MAX, self.blood + amount)
         if self.blood >= BLOOD_MAX and not self.frenzy:
             self.frenzy = True
@@ -338,6 +343,8 @@ class Player:
             g.shake = max(g.shake, 10)
 
     def start_leap(self, enemy):
+        if self.bat:
+            return
         self.dash = {"kind": "leap", "target": enemy, "speed": 1600, "time": 0.45}
 
     def update(self, g, dt, move):
@@ -347,24 +354,31 @@ class Player:
         d = g.mouse - self.pos
         if d.length() > 4:
             self.facing = math.atan2(d.y, d.x)
-        if self.frenzy:
-            self.blood -= FRENZY_DRAIN * dt
+        resting = g.resting()    # entre as ondas o sangue (e o frenesi) não escorrem
+        if self.bat:
+            pass
+        elif self.frenzy:
+            if not resting:
+                self.blood -= FRENZY_DRAIN * dt
             if self.blood <= FRENZY_END:
                 self.blood = FRENZY_END
                 self.frenzy = False
                 g.add_text(self.pos + V2(0, -40), "frenesi acabou", (220, 180, 190), 1.0, 20)
-        else:
+        elif not resting:
             self.blood -= BLOOD_DRAIN * dt
         if self.dash:
             self.update_dash(g, dt)
         else:
-            speed = 235 * (FRENZY_SPEED if self.frenzy else 1.0)
+            if self.bat:
+                speed = 310
+            else:
+                speed = 235 * (FRENZY_SPEED if self.frenzy else 1.0)
             self.vel += (move * speed - self.vel) * min(1.0, 14 * dt)
             self.pos += self.vel * dt
         self.pos.x = max(22, min(WORLD_W - 22, self.pos.x))
         self.pos.y = max(22, min(WORLD_H - 22, self.pos.y))
-        if self.blood <= 0 and not self.frenzy:
-            g.game_over()
+        if self.blood <= 0 and not self.frenzy and not self.bat:
+            g.become_bat()
 
     def update_dash(self, g, dt):
         d = self.dash
@@ -405,8 +419,33 @@ class Player:
         if d.get("burst"):
             g.tooth_ring(self.pos, d["burst"][0], d["burst"][1])
 
+    def draw_bat(self, s, sp, g):
+        pygame.draw.ellipse(s, (8, 6, 12), (sp.x - 12, sp.y + 12, 24, 9))
+        fv = V2(math.cos(self.facing), math.sin(self.facing))
+        perp = V2(-fv.y, fv.x)
+        flap = math.sin(g.time * 22)
+        body = (255, 255, 255) if (self.flash > 0 or (self.invuln > 0 and int(g.time * 30) % 2 == 0)) else (58, 18, 52)
+        for side in (1, -1):
+            tip = sp + perp * side * (26 + 6 * flap) + fv * (-4 + 6 * flap)
+            mid = sp + perp * side * 14 - fv * 12
+            pts = [sp + perp * side * 4, sp + perp * side * 12 + fv * 9, tip,
+                   mid + perp * side * 4, sp - fv * 10]
+            pygame.draw.polygon(s, (88, 24, 70), pts)
+            pygame.draw.polygon(s, (24, 6, 22), pts, 2)
+        pygame.draw.circle(s, body, sp, 9)
+        pygame.draw.polygon(s, body, [sp + fv * 4 + perp * 7, sp + fv * 14 + perp * 5, sp + fv * 8 + perp * 2])
+        pygame.draw.polygon(s, body, [sp + fv * 4 - perp * 7, sp + fv * 14 - perp * 5, sp + fv * 8 - perp * 2])
+        pygame.draw.circle(s, (255, 50, 70), sp + fv * 5 + perp * 3, 2)
+        pygame.draw.circle(s, (255, 50, 70), sp + fv * 5 - perp * 3, 2)
+        if self.cast_cd > 0.3:  # mordida
+            pygame.draw.line(s, (255, 255, 255), sp + fv * 9 + perp * 2, sp + fv * 14 + perp * 2, 2)
+            pygame.draw.line(s, (255, 255, 255), sp + fv * 9 - perp * 2, sp + fv * 14 - perp * 2, 2)
+
     def draw(self, s, cam, g):
         sp = self.pos - cam
+        if self.bat:
+            self.draw_bat(s, sp, g)
+            return
         pygame.draw.ellipse(s, (8, 6, 12), (sp.x - 17, sp.y + 8, 34, 13))
         if self.frenzy:
             pulse = 0.5 + 0.5 * math.sin(g.time * 14)
@@ -508,7 +547,7 @@ class Game:
 
     # ---- input
     def add_element(self, e):
-        if self.state == "play" and len(self.player.queue) < 3:
+        if self.state == "play" and not self.player.bat and len(self.player.queue) < 3:
             self.player.queue.append(e)
 
     def clear_queue(self):
@@ -545,16 +584,58 @@ class Game:
         p = self.player
         if self.state != "play" or p.invuln > 0 or p.dash:
             return False
+        self.shake = max(self.shake, 9)
+        self.blood_burst(p.pos, 8)
+        if p.bat:  # morcego morre com 1 golpe
+            self.blood_burst(p.pos, 24, 260)
+            self.game_over()
+            return True
         p.blood -= dmg
         p.invuln = 0.45
         p.flash = 0.18
         p.vel += norm(p.pos - src) * 260
-        self.shake = max(self.shake, 9)
-        self.blood_burst(p.pos, 8)
         self.add_text(p.pos + V2(0, -30), "-%d" % dmg, (255, 90, 110), 0.7, 22)
         if p.blood <= 0 and not p.frenzy:
-            self.game_over()
+            self.become_bat()
         return True
+
+    def resting(self):
+        """Entre as ondas (nenhum inimigo vivo ou por nascer) o sangue não escorre."""
+        return not self.enemies and not self.spawn_q
+
+    def become_bat(self):
+        p = self.player
+        if p.bat or self.state != "play":
+            return
+        p.bat = True
+        p.blood = 0.0
+        p.r = 10
+        p.frenzy = False
+        p.queue.clear()
+        p.mouth.clear()
+        p.dash = None
+        p.invuln = 0.6   # um respiro curto ao se transformar
+        self.timers.clear()
+        self.add_fx("ring", p.pos, 0, 160, 0.5, (150, 60, 200))
+        self.add_text(p.pos + V2(0, -42), "MORCEGO! mate um inimigo para voltar", (200, 150, 255), 2.0, 22)
+        self.shake = max(self.shake, 10)
+
+    def revert_human(self):
+        p = self.player
+        p.bat = False
+        p.r = 14
+        p.blood = BAT_REVERT_BLOOD
+        p.invuln = 1.0
+        self.add_fx("ring", p.pos, 0, 200, 0.5, (255, 90, 110))
+        self.add_text(p.pos + V2(0, -42), "forma normal!", (255, 150, 160), 1.4, 24)
+
+    def bite(self):
+        p = self.player
+        a = self.aim()
+        face = math.atan2(a.y, a.x)
+        p.vel += a * 520  # bote para frente
+        self.cone(p.pos, face, 66, 120, BAT_BITE_DAMAGE, 120, 0.1, (255, 255, 255))
+        p.cast_cd = 0.4
 
     def damage_enemy(self, e, dmg, src, knock=0.0, stun=0.0):
         if e.dead:
@@ -575,6 +656,8 @@ class Game:
         if e.hp <= 0:
             e.dead = True
             self.kills += 1
+            if self.player.bat:
+                self.revert_human()
             self.blood_burst(e.pos, 20, 260)
             self.splat(e.pos)
             self.shake = max(self.shake, 6)
@@ -604,6 +687,9 @@ class Game:
     def cast(self):
         p = self.player
         if self.state != "play" or p.cast_cd > 0 or p.dash:
+            return
+        if p.bat:
+            self.bite()
             return
         q = list(p.queue)
         if not q:
@@ -913,7 +999,7 @@ class Game:
             pygame.draw.rect(s, col, (x, y, int(w * frac), h), border_radius=6)
             pygame.draw.rect(s, (255, 130, 140), (x + 4, y + 3, max(0, int(w * frac) - 8), 5), border_radius=3)
         pygame.draw.rect(s, (230, 200, 205), (x, y, w, h), 2, border_radius=6)
-        label = "FRENESI!" if p.frenzy else "SANGUE"
+        label = "FRENESI!" if p.frenzy else ("MORCEGO — mate um inimigo para voltar" if p.bat else "SANGUE")
         draw_text(s, label, 16, (255, 240, 240), (x + 10, y + h / 2), "midleft", True)
         draw_text(s, "%d" % max(0, p.blood), 16, (255, 240, 240), (x + w - 10, y + h / 2), "midright", True)
         if p.mouth:
@@ -921,7 +1007,7 @@ class Game:
             for i in range(len(p.mouth)):
                 pygame.draw.circle(s, (255, 150, 40), (x + 62 + i * 20, y + h + 20), 7)
                 pygame.draw.circle(s, (255, 235, 150), (x + 62 + i * 20, y + h + 20), 3)
-            draw_text(s, "clique sem elementos p/ cuspir de volta", 14, (230, 200, 160), (x + 62 + 3 * 20 + 6, y + h + 12))
+            draw_text(s, "botão dir. sem elementos: cuspir de volta", 14, (230, 200, 160), (x + 62 + 3 * 20 + 6, y + h + 12))
 
         # info da onda
         draw_text(s, "Onda %d" % self.wave, 22, (255, 235, 235), (W - 24, 20), "topright", True)
@@ -935,7 +1021,7 @@ class Game:
         total = 3 * slot + 2 * gap
         sx = W / 2 - total / 2
         sy = 18
-        for i in range(3):
+        for i in range(0 if p.bat else 3):
             r = pygame.Rect(sx + i * (slot + gap), sy, slot, slot)
             pygame.draw.rect(s, (18, 10, 22), r, border_radius=10)
             if i < len(p.queue):
@@ -947,22 +1033,30 @@ class Game:
             if i == 0:
                 draw_text(s, "1º", 12, (200, 180, 200), (r.left + 5, r.top + 3))
         name = combo_name(p.queue)
-        if name:
+        if p.bat:
+            draw_text(s, "BOTÃO DIR.: morder", 22, (200, 150, 255), (W / 2, sy + 10), "midtop", True)
+            draw_text(s, "1 golpe e você morre", 16, (230, 190, 255), (W / 2, sy + 40), "midtop")
+        elif name:
             draw_text(s, name, 20, (255, 235, 200), (W / 2, sy + slot + 12), "midtop", True)
         elif p.mouth:
             draw_text(s, "Cuspir tiro de volta", 18, (255, 200, 120), (W / 2, sy + slot + 12), "midtop", True)
-        if p.cast_cd > 0:
+        if p.cast_cd > 0 and not p.bat:
             pygame.draw.rect(s, (255, 235, 200), (sx, sy + slot + 4, total * min(1, p.cast_cd / 0.9), 3))
+        if self.resting() and self.state == "play" and not p.bat:
+            draw_text(s, "sangue em pausa entre as ondas", 14, (200, 170, 180), (24, 84))
 
         # legenda de teclas
         by = H - 48
-        items = [(LEG, "SHIFT"), (ARM, "BOTÃO DIR."), (TOOTH, "ESPAÇO")]
-        bx = W / 2 - 330
-        for e, k in items:
-            draw_icon(s, e, (bx + 14, by), 20)
-            draw_text(s, "%s: %s" % (k, ELEM_LABEL[e]), 15, (225, 210, 220), (bx + 34, by), "midleft")
-            bx += 190
-        draw_text(s, "BOTÃO ESQ.: lançar   Q: limpar   P: pausa", 14, (180, 165, 185), (W / 2, H - 12), "midbottom")
+        if p.bat:
+            draw_text(s, "BOTÃO DIR.: morder   WASD: voar   P: pausa", 14, (180, 165, 185), (W / 2, H - 12), "midbottom")
+        else:
+            items = [(LEG, "SHIFT"), (ARM, "BOTÃO ESQ."), (TOOTH, "ESPAÇO")]
+            bx = W / 2 - 330
+            for e, k in items:
+                draw_icon(s, e, (bx + 14, by), 20)
+                draw_text(s, "%s: %s" % (k, ELEM_LABEL[e]), 15, (225, 210, 220), (bx + 34, by), "midleft")
+                bx += 190
+            draw_text(s, "BOTÃO DIR.: lançar   Q: limpar   P: pausa", 14, (180, 165, 185), (W / 2, H - 12), "midbottom")
 
         if self.banner[1] > 0:
             k = min(1.0, self.banner[1])
@@ -978,11 +1072,11 @@ class Game:
     def draw_menu(self, s):
         self.draw_overlay_panel(s, 190)
         draw_text(s, "VAMPIRINHA", 84, (210, 25, 50), (W / 2, 70), "midtop", True)
-        draw_text(s, "O sangue é a sua vida — e o seu relógio. Cause dano para se manter de pé.", 20, (235, 215, 220), (W / 2, 168), "midtop")
+        draw_text(s, "O sangue é a sua vida — e o seu relógio. Cause dano para se manter de pé (ele pausa entre as ondas).", 20, (235, 215, 220), (W / 2, 168), "midtop")
         col1 = [
             "MOVER: W A S D        MIRAR: mouse",
-            "SHIFT = perna     BOTÃO DIREITO = braço     ESPAÇO = dente",
-            "Empilhe até 3 elementos e lance com o BOTÃO ESQUERDO (Q limpa).",
+            "SHIFT = perna     BOTÃO ESQUERDO = braço     ESPAÇO = dente",
+            "Empilhe até 3 elementos e lance com o BOTÃO DIREITO (Q limpa).",
             "O 1º elemento define a ação; repetir fortalece; misturar faz as duas coisas.",
         ]
         for i, t in enumerate(col1):
@@ -997,20 +1091,21 @@ class Game:
             ("braço + dente", "soco com dente em área"),
             ("dente + perna", "cospe a perna; se acertar, pula até o inimigo"),
             ("dente + braço", "arremessa o braço como bumerangue"),
-            ("dente, dente, dente", "PARRY: come o tiro que vem (clique p/ devolver)"),
+            ("dente, dente, dente", "PARRY: come o tiro que vem (botão dir. p/ devolver)"),
         ]
         y0 = 340
         for i, (k, d) in enumerate(combos):
             draw_text(s, k, 17, (255, 205, 150), (W / 2 - 20, y0 + i * 25), "topright", True)
             draw_text(s, d, 17, (230, 220, 225), (W / 2 + 0, y0 + i * 25), "topleft")
-        draw_text(s, "Sangue em 100% = FRENESI: mais rápida e com mais dano. Sangue em 0 = fim.", 17, (255, 160, 170), (W / 2, 612), "midtop")
+        draw_text(s, "Sangue cheio = FRENESI. Sangue zerado = MORCEGO (só morde; 1 golpe e acabou; mate um inimigo para voltar).", 17, (255, 160, 170), (W / 2, 612), "midtop")
         blink = int(pygame.time.get_ticks() / 500) % 2 == 0
         if blink:
             draw_text(s, "ENTER, ESPAÇO ou clique para começar", 26, (255, 255, 255), (W / 2, 654), "midtop", True)
 
     def draw_over(self, s):
         self.draw_overlay_panel(s, 190)
-        draw_text(s, "SEM SANGUE", 80, (210, 25, 50), (W / 2, 190), "midtop", True)
+        title = "MORCEGO ABATIDO" if self.player.bat else "SEM SANGUE"
+        draw_text(s, title, 80, (210, 25, 50), (W / 2, 190), "midtop", True)
         draw_text(s, "Chegou até a onda %d" % self.wave, 28, (240, 225, 230), (W / 2, 300), "midtop")
         draw_text(s, "Abates: %d     Tempo: %d:%02d" % (self.kills, int(self.time) // 60, int(self.time) % 60), 24, (240, 225, 230), (W / 2, 345), "midtop")
         draw_text(s, "ENTER ou clique para tentar de novo", 26, (255, 255, 255), (W / 2, 440), "midtop", True)
@@ -1069,9 +1164,9 @@ def main():
                 if game.state in ("menu", "over") and ev.button == 1:
                     game.start()
                 elif ev.button == 1:
-                    game.cast()
-                elif ev.button == 3:
                     game.add_element(ARM)
+                elif ev.button == 3:
+                    game.cast()
 
         keys = pygame.key.get_pressed()
         move = V2(keys[pygame.K_d] - keys[pygame.K_a], keys[pygame.K_s] - keys[pygame.K_w])
