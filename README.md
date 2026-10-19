@@ -124,7 +124,8 @@ Todo golpe dele tem um **aviso vermelho no chão** e uma animação de soco pró
 
 - **A Vampirinha** vem da folha de sprites de referência em pixel art (`tools/ref/vampirinha_ref.png`): cabelo
   preto comprido, pele pálida, vestido preto e vermelho e capa. O gerador recorta cada quadro, tira o fundo e
-  alinha tudo pelos pés: **andar** (9 quadros), **ataque com garras** (10), **cuspir dentes** (7), **chutar** (6) e
+  alinha tudo pelos pés (com borda de transparência suave, sem serrilhado nem franja do fundo) e cria um quadro
+  intermediário entre cada par por fluxo óptico, para a animação ficar mais suave: **andar** (9 quadros), **ataque com garras** (10), **cuspir dentes** (7), **chutar** (6) e
   **dash** (8, desfazendo-se em fumaça e morcegos). Ela é desenhada de lado e espelhada quando olha para a esquerda.
   Os outros golpes reaproveitam esses quadros (soco = garras, arremesso = garras, parry = cuspe).
 - **Rosto no HUD** em pixel art, no mesmo visual: **normal**, **frenesi** (olhos vermelhos brilhando), **quase sem
