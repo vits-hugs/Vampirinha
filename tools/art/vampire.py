@@ -14,18 +14,18 @@ from . import vampire_head as vh
 from .kit import P, add, lerp, lerp2, mix, rot, tapered
 
 # ------------------------------------------------------------------ paleta da roupa
-DRESS = "#c4193f"
-DRESS_SH = "#8a0f2d"
-DRESS_HL = "#f0506e"
-CORSET = "#2b1631"
+DRESS = "#a3162f"
+DRESS_SH = "#680b1e"
+DRESS_HL = "#d33a55"
+CORSET = "#1d1420"
 LACE = "#fff6f8"
 LACE_SH = "#e4cad8"
-CAPE_OUT = "#2c1c36"
-CAPE_OUT_HL = "#4a3360"
-CAPE_IN = "#c8183f"
-CAPE_IN_SH = "#760b26"
-STOCK = "#2e2236"
-STOCK_HL = "#56426a"
+CAPE_OUT = "#1b1219"
+CAPE_OUT_HL = "#3e2c40"
+CAPE_IN = "#a3162f"
+CAPE_IN_SH = "#5e0a1c"
+STOCK = "#211823"
+STOCK_HL = "#4a3a50"
 SHOE = "#5e1428"
 SHOE_HL = "#9a2c45"
 SOLE = "#1c0f18"
@@ -544,12 +544,12 @@ def frame_draw(ps, view):
 
 
 # ------------------------------------------------------------------ forma de morcego
-FUR = "#e4dcf2"
-FUR_SH = "#b3a6d6"
-FUR_LINE = "#3e2f63"
-WING = "#2c1c36"
-WING_IN = "#a5123a"
-WING_LINE = "#140a18"
+FUR = "#3a2f44"
+FUR_SH = "#241c2c"
+FUR_LINE = "#07040a"
+WING = "#1b1219"
+WING_IN = "#8e1029"
+WING_LINE = "#050306"
 
 
 def bat_wing(flap, side, scale=1.0):

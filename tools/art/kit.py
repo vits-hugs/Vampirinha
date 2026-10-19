@@ -348,3 +348,47 @@ def sheet(frames, cols=None, pad=0):
         r, c = divmod(i, cols)
         out[r * (fh + pad):r * (fh + pad) + fh, c * (fw + pad):c * (fw + pad) + fw] = f
     return out, cols
+
+
+# ------------------------------------------------------------------ estilo pixel art
+def pixelize(arr, colors=48, chunk=1, outline="#0c070f", alpha_cut=110):
+    """Deixa um quadro com cara de pixel art: alfa duro, paleta reduzida e contorno
+    escuro de 1 "pixel" por fora. chunk=2 junta blocos de 2x2 (pixel mais grosso)."""
+    from PIL import Image
+    h, w = arr.shape[:2]
+    src = arr
+    if chunk > 1:
+        a = arr[:, :, 3:4].astype(np.float32) / 255.0
+        pm = arr.astype(np.float32)
+        pm[:, :, :3] *= a
+        small = np.asarray(Image.fromarray(np.clip(pm, 0, 255).astype(np.uint8), "RGBA")
+                           .resize((w // chunk, h // chunk), Image.BOX)).astype(np.float32)
+        sa = small[:, :, 3:4] / 255.0
+        small[:, :, :3] = np.where(sa > 0.004, small[:, :, :3] / np.maximum(sa, 1e-6), 0)
+        src = np.clip(small, 0, 255).astype(np.uint8)
+    sh, sw = src.shape[:2]
+    alpha = src[:, :, 3] >= alpha_cut
+    out = np.zeros((sh, sw, 4), np.uint8)
+    if alpha.any():
+        rgb = src[:, :, :3][alpha]
+        pal_img = Image.fromarray(rgb.reshape(1, -1, 3), "RGB").quantize(colors=colors, method=Image.Quantize.MEDIANCUT,
+                                                                           dither=Image.Dither.NONE)
+        q = np.asarray(pal_img.convert("RGB")).reshape(-1, 3)
+        out[:, :, :3][alpha] = q
+        out[:, :, 3][alpha] = 255
+        if outline:
+            col = [int(outline.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
+            grow = np.zeros_like(alpha)
+            grow[1:, :] |= alpha[:-1, :]
+            grow[:-1, :] |= alpha[1:, :]
+            grow[:, 1:] |= alpha[:, :-1]
+            grow[:, :-1] |= alpha[:, 1:]
+            ring = grow & ~alpha
+            out[ring, :3] = col
+            out[ring, 3] = 255
+    if chunk > 1:
+        out = np.repeat(np.repeat(out, chunk, axis=0), chunk, axis=1)
+        full = np.zeros((h, w, 4), np.uint8)
+        full[:out.shape[0], :out.shape[1]] = out[:h, :w]
+        out = full
+    return out

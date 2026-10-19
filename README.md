@@ -50,6 +50,7 @@ Quando o sangue acaba, a vampira se transforma em morcego:
 | Limpar a fila | `R` (ou `Backspace`) |
 | **Morder** (só na forma de morcego) | botão direito do mouse |
 | Pausa | `P` ou `Esc` |
+| Ligar/desligar o som | `M` |
 | Tela cheia | `F11` |
 
 Na vista 3/4 o cursor fica na altura do corpo: o ponto do chão para onde ela anda (e mira) fica um pouco
@@ -121,32 +122,32 @@ Todo golpe dele tem um **aviso vermelho no chão** e uma animação de soco pró
 
 ## Arte
 
-Toda a arte é vetorial e gerada por código (`tools/`), em estilo anime/chibi, e fica pronta em `assets/`
-(folhas PNG + `assets/sprites.json`). O jogo só carrega os PNGs.
+- **A Vampirinha** vem da folha de sprites de referência em pixel art (`tools/ref/vampirinha_ref.png`): cabelo
+  preto comprido, pele pálida, vestido preto e vermelho e capa. O gerador recorta cada quadro, tira o fundo e
+  alinha tudo pelos pés: **andar** (9 quadros), **ataque com garras** (10), **cuspir dentes** (7), **chutar** (6) e
+  **dash** (8, desfazendo-se em fumaça e morcegos). Ela é desenhada de lado e espelhada quando olha para a esquerda.
+  Os outros golpes reaproveitam esses quadros (soco = garras, arremesso = garras, parry = cuspe).
+- **Rosto no HUD** em pixel art, no mesmo visual: **normal**, **frenesi** (olhos vermelhos brilhando), **quase sem
+  sangue** (pálida, cansada, gota de suor), **dor**, **morcego** e **morta**. Ela pisca de vez em quando, e quando
+  **cospe**, o retrato faz biquinho e **os dentes saem voando da boca** (ou a perna, ou o tiro devolvido).
+- **Inimigos, morcego, objetos e projéteis** são vetoriais (`tools/art/`) e passam por um filtro de pixel art
+  (alfa duro, paleta reduzida e contorno escuro) para combinar com a vampira.
+- **Efeitos de golpe**: garras, chute, soco com dentes voando, espada, mordida, faíscas, ondas de choque e
+  rachaduras no chão.
 
-- **A Vampirinha**: cabelo prateado em maria-chiquinha com presilhas de morcego, olhos vermelhos com pupila de
-  fenda, presinha, vestido gótico vermelho e capa de gola alta. Vista 3/4 de frente e de costas (espelhada para a
-  esquerda), com animações de parada, corrida, soco, chute, cuspe, arremesso, dash, voadora, dor, mordida do parry
-  e pulinho num pé só. Enquanto o braço está voando como bumerangue ela aparece **sem o braço**, e enquanto a perna
-  está voando ela **pula numa perna só**. No dash ela deixa um rastro.
-- **Forma de morcego**: morceguinho branco com asas vermelhas, que voa, morde e cai.
-- **Rosto no HUD**: o retrato muda conforme o estado: **normal**, **frenesi** (olhos vermelhos brilhando, sorriso
-  de presas), **quase sem sangue** (pálida, cansada, gota de suor), **dor** quando apanha, **morcego** e **morta**
-  (olho em X, alminha saindo). Ela pisca de vez em quando. Quando ela **cospe**, o retrato faz biquinho e **os dentes
-  saem voando da boca** (ou a perna, ou o tiro devolvido), quicam e somem.
-- **Inimigos**: caçador de chapéu com espada, atirador com mosquete e laser de mira, cachorro de caça e o Gigante
-  carrasco de capuz com manoplas de ferro (braços montados em tempo real para os socos). Todos com animações de
-  andar, aviso de golpe, ataque, dor e corpo caído.
-- **Efeitos de golpe**: garras vermelhas, arco dourado do chute, explosão do soco com dentes voando, corte azul
-  da espada, mandíbulas do parry e da mordida, faíscas de acerto (douradas no frenesi), ondas de choque e
-  rachaduras no chão nos socos do Gigante.
-- **Cenário**: chão de lajotas, túmulos, cruzes, velas acesas, ossos e matinhos.
+## Sons
 
-Para regerar a arte depois de mexer em `tools/art/`:
+27 efeitos sonoros sintetizados por código (`tools/make_sounds.py`, sem arquivos de fora): garras, cuspe, chute,
+soco, dash, arremesso, parry, dor, frenesi, virar morcego, voltar ao normal, mordida, morte, acertos, espada, tiro e
+mira, latido, golpes e soco no chão do Gigante, rugido, aviso da Chuva de Socos e início/fim de onda.
+`M` liga e desliga o som. Sem saída de áudio o jogo roda mudo, sem erro.
+
+Para regerar a arte ou os sons depois de mexer em `tools/`:
 
 ```bash
 pip install -r tools/requirements.txt
 python3 tools/make_assets.py
+python3 tools/make_sounds.py
 ```
 
 ## Estrutura
@@ -154,8 +155,10 @@ python3 tools/make_assets.py
 ```
 main.py              o jogo (entidades, chefe, combos, HUD)
 sprites.py           carrega a arte de assets/ e ajuda a desenhar (espelhar, piscar, girar efeitos)
+sounds.py            toca os efeitos sonoros de assets/sfx/
 assets/              folhas de sprites geradas (PNG) + sprites.json
-tools/make_assets.py gera tudo em assets/ a partir de tools/art/ (vampira, retratos, inimigos, efeitos...)
+tools/make_assets.py gera a arte em assets/ (vampira recortada de tools/ref/, retratos, inimigos, efeitos...)
+tools/make_sounds.py gera os sons em assets/sfx/
 tests/test_smoke.py  testes sem janela das mecânicas e da arte (python tests/test_smoke.py)
 run.sh               atalho que cria o venv e roda
 ```

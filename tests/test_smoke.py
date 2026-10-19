@@ -629,8 +629,7 @@ def test_assets_complete():
                  "fx_shock", "disc", "streak"):
         assert len(A.frames(name)) == A.meta[name]["count"], name
     for view in ("front", "back"):
-        for anim in ("idle", "run", "punch", "kick", "spit", "throw", "dash", "dash_strike", "hurt", "chomp", "hop",
-                     "idle_na", "run_na", "hop_na"):
+        for anim in ("idle", "run", "punch", "kick", "spit", "throw", "dash", "dash_strike", "hurt", "chomp", "hop"):
             assert A.has_anim("vampire", view + "/" + anim), (view, anim)
     for st in ("normal", "normal_blink", "normal_spit", "frenzy", "frenzy_blink", "frenzy_spit", "low", "low_blink",
                "low_spit", "hurt", "dead", "bat"):
@@ -658,9 +657,9 @@ def test_player_animation_follows_actions():
     g2.enemies.append(Enemy("sword", g2.player.pos + V2(900, 900)))
     cast(g2, TOOTH, ARM)
     assert g2.player.action == "throw"
-    step(g2, 30)  # arremesso terminou, o braço ainda está voando
+    step(g2, 30)  # arremesso terminou: volta a ficar parada
     idx, _ = g2.player.anim_state(g2, A)
-    assert idx in A.anim("vampire", "front/idle_na")["frames"] + A.anim("vampire", "front/run_na")["frames"]
+    assert idx in A.anim("vampire", "front/idle")["frames"] + A.anim("vampire", "front/run")["frames"]
     g3 = fresh()
     cast(g3, TOOTH, LEG)
     step(g3, 20)  # perna voando: ela pula num pé só
@@ -836,6 +835,39 @@ def test_effects_render_rotated_and_cached():
     assert b.get_width() > a.get_width(), "girar 45 graus alarga a imagem"
     A.shock_ring(screen, (300, 300), 120, (255, 60, 60), 200)
     assert A.disc((10, 20, 30), 12).get_at((20, 20))[:3] == (10, 20, 30)
+
+
+# ------------------------------------------------------------------ sons
+def test_sounds_load_and_play_on_events():
+    import sounds
+    assert len([f for f in os.listdir(sounds.SFX_DIR) if f.endswith(".wav")]) >= 25
+    sounds.init()  # com SDL_AUDIODRIVER=dummy o mixer abre; sem áudio, tudo vira silêncio
+    heard = []
+    orig = sounds.play
+    sounds.play = lambda name, volume=1.0: heard.append(name)
+    try:
+        g = fresh()
+        e = Enemy("sword", g.player.pos + V2(60, 0))
+        e.hp = 1
+        g.enemies.append(e)
+        g.enemies.append(Enemy("sword", g.player.pos + V2(900, 900)))
+        cast(g, ARM)
+        cast(g, TOOTH)
+        cast(g, ARM, LEG)
+        cast(g, ARM, TOOTH)
+        cast(g, LEG)
+        g.player.dash = None  # no dash ela não toma dano
+        g.player.invuln = 0
+        g.hurt_player(5, g.player.pos + V2(10, 0))
+        for name in ("claw", "hit", "kill", "spit", "kick", "punch", "dash", "hurt"):
+            assert name in heard, name
+        g.start_wave(5)
+        assert "wave" in heard
+    finally:
+        sounds.play = orig
+    sounds.play("claw")
+    assert sounds.toggle_mute() is True and sounds.play("claw") is None
+    sounds.toggle_mute()
 
 
 def test_render_all_states():

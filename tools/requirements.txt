@@ -1,5 +1,6 @@
 # Só para REGERAR a arte (python3 tools/make_assets.py). O jogo em si só precisa do pygame.
-# Testado com skia-python 144, numpy 2.5 e pillow 12.
+# Testado com skia-python 144, numpy 2.5, pillow 12 e scipy 1.18. Os sons (tools/make_sounds.py) só usam numpy.
 skia-python
 numpy
 pillow
+scipy

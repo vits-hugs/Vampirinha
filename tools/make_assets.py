@@ -15,6 +15,8 @@ import sys
 import time
 import zlib
 
+import numpy as np
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from art import enemies as e  # noqa: E402
@@ -56,6 +58,18 @@ def rel(points):
     return out
 
 
+# folhas que passam pelo filtro de pixel art (mesmo estilo da folha de referência da vampira);
+# os efeitos de golpe (fx_*) continuam com brilho suave
+PIXEL = {"bat", "hunter", "gunner", "gun_arm", "dog", "boss", "fist", "tooth", "tooth_hud", "leg", "leg_hud", "arm",
+         "icons", "props", "bullet", "bullet_back", "muzzle"}
+
+
+def styled(name, frames):
+    if name in PIXEL:
+        return [kit.pixelize(f) for f in frames]
+    return frames
+
+
 class Sheet:
     def __init__(self, name, cell, anchor, cols=16):
         self.name, self.cell, self.anchor, self.cols = name, cell, anchor, cols
@@ -71,7 +85,7 @@ class Sheet:
         self.anims[key] = {"fps": fps, "loop": loop, "frames": idx}
 
     def save(self, meta):
-        rgba, cols = kit.sheet(self.frames, cols=min(self.cols, len(self.frames)))
+        rgba, cols = kit.sheet(styled(self.name, self.frames), cols=min(self.cols, len(self.frames)))
         kit.save_png(rgba, os.path.join(OUT, self.name + ".png"))
         meta[self.name] = {"sheet": self.name + ".png", "cell": list(self.cell), "anchor": list(self.anchor), "cols": cols,
                            "count": len(self.frames), "anims": self.anims, "points": self.points}
@@ -89,7 +103,7 @@ def rotations(name, draw_fn, size, n, meta, scale=1.0):
                 draw_fn(pen)
         arr, _ = cell_render(d, size, (size[0] / 2, size[1] / 2))
         frames.append(arr)
-    rgba, cols = kit.sheet(frames, cols=n)
+    rgba, cols = kit.sheet(styled(name, frames), cols=n)
     kit.save_png(rgba, os.path.join(OUT, name + ".png"))
     meta[name] = {"sheet": name + ".png", "cell": list(size), "anchor": [size[0] / 2, size[1] / 2], "cols": cols, "count": n}
     print("  %-10s %3d rotações" % (name, n))
@@ -97,12 +111,60 @@ def rotations(name, draw_fn, size, n, meta, scale=1.0):
 
 def single(name, draws, size, origin, meta, extra=None):
     frames = [cell_render(d, size, origin)[0] for d in draws]
-    rgba, cols = kit.sheet(frames, cols=len(frames))
+    rgba, cols = kit.sheet(styled(name, frames), cols=len(frames))
     kit.save_png(rgba, os.path.join(OUT, name + ".png"))
     meta[name] = {"sheet": name + ".png", "cell": list(size), "anchor": list(origin), "cols": cols, "count": len(frames)}
     if extra:
         meta[name].update(extra)
     print("  %-10s %3d quadros" % (name, len(frames)))
+
+
+VAMP_CELL, VAMP_ANCHOR = (160, 110), (82, 104)
+# animação -> (faixa da folha de referência, quadros, fps, repete?)
+VAMP_ANIMS = {
+    "idle": ("walk", [0, 0], 3, True),
+    "run": ("walk", list(range(9)), 14, True),
+    "punch": ("claw", list(range(10)), 30, False),
+    "throw": ("claw", [0, 2, 4, 5, 6, 8], 20, False),
+    "spit": ("spit", list(range(7)), 24, False),
+    "chomp": ("spit", [2, 3, 4, 5, 4, 3], 20, False),
+    "kick": ("kick", list(range(6)), 18, False),
+    "dash": ("dash", list(range(8)), 36, False),
+    "dash_strike": ("dash", list(range(8)), 36, False),
+    "hurt": ("walk", [0, 0], 10, False),
+    "hop": ("walk", [0, 4], 8, True),
+}
+
+
+def build_vampire(meta):
+    """Vampira: quadros recortados da folha de referência (tools/ref/vampirinha_ref.png).
+    Ela foi desenhada de lado olhando para a direita; a esquerda é o espelho, feito no jogo."""
+    from art import ref_sheet
+    bands = ref_sheet.load_frames()
+    cells = {k: ref_sheet.to_cells(fr, VAMP_CELL, VAMP_ANCHOR) for k, fr in bands.items()}
+    frames, points, anims, index = [], [], {}, {}
+    for band, lst in cells.items():
+        for i, (img, pts) in enumerate(lst):
+            index[(band, i)] = len(frames)
+            frames.append(img)
+            points.append(pts)
+    # parada: o 2º quadro é o 1º descido 1 px (respiração)
+    breath = np.zeros_like(frames[index[("walk", 0)]])
+    breath[1:] = frames[index[("walk", 0)]][:-1]
+    index[("breath", 0)] = len(frames)
+    frames.append(breath)
+    points.append(points[index[("walk", 0)]])
+    for name, (band, ids, fps, loop) in VAMP_ANIMS.items():
+        idx = [index[(band, i)] for i in ids]
+        if name == "idle":
+            idx = [index[("walk", 0)], index[("breath", 0)]]
+        for view in ("front", "back"):  # só existe a vista de lado; as duas chaves apontam para ela
+            anims[view + "/" + name] = {"fps": fps, "loop": loop, "frames": idx}
+    rgba, cols = kit.sheet(frames, cols=16)
+    kit.save_png(rgba, os.path.join(OUT, "vampire.png"))
+    meta["vampire"] = {"sheet": "vampire.png", "cell": list(VAMP_CELL), "anchor": list(VAMP_ANCHOR), "cols": cols,
+                       "count": len(frames), "anims": anims, "points": points}
+    print("  vampire    %3d quadros (folha de referência)" % len(frames))
 
 
 def build():
@@ -112,12 +174,7 @@ def build():
     print("Gerando sprites em", OUT)
 
     # ---------------- vampira
-    sh = Sheet("vampire", (128, 128), (64, 118))
-    A = v.anim_poses()
-    for view in ("front", "back"):
-        for name, (fps, loop, poses) in A.items():
-            sh.add_anim(view + "/" + name, fps, loop, [v.frame_draw(ps, view) for ps in poses])
-    sh.save(meta)
+    build_vampire(meta)
 
     # ---------------- morcego
     sb = Sheet("bat", (112, 104), (56, 96))
@@ -201,7 +258,7 @@ def build():
             # semente estável (hash() de str muda a cada execução do Python)
             seed = zlib.crc32(("%s:%d:%d" % (kind, ki, variant)).encode())
             dec.append(cell_render(lambda pen, k=kind, sd=seed: gr.decal(pen, k, _r.Random(sd)), (48, 32), (24, 16))[0])
-    rgba, cols = kit.sheet(dec, cols=len(dec))
+    rgba, cols = kit.sheet([kit.pixelize(d, outline=None) for d in dec], cols=len(dec))
     kit.save_png(rgba, os.path.join(OUT, "decals.png"))
     meta["decals"] = {"sheet": "decals.png", "cell": [48, 32], "anchor": [24, 16], "cols": cols, "count": len(dec),
                       "weights": [w for w in gr.DECAL_WEIGHTS for _ in range(2)]}
@@ -216,7 +273,7 @@ def build():
         draw, mouth = pt.draw_bat_portrait() if st == "bat" else pt.draw_portrait(st)
         arr = kit.render(pt.SIZE / pt.SCALE, pt.SIZE / pt.SCALE, draw, scale=pt.SCALE * SS)
         arr = kit.downsample(arr, SS)
-        frames.append(pt.mask_portrait(arr))
+        frames.append(kit.pixelize(pt.mask_portrait(arr), colors=64, chunk=2))  # retrato em pixel art 2x2
         mouths[st] = [round(mouth[0], 1), round(mouth[1], 1)]
     rgba, cols = kit.sheet(frames, cols=len(frames))
     kit.save_png(rgba, os.path.join(OUT, "portraits.png"))

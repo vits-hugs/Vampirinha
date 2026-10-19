@@ -10,6 +10,7 @@ import sys
 import pygame
 from pygame.math import Vector2 as V2
 
+import sounds as SFX
 import sprites as SP
 
 # ---------------------------------------------------------------- constantes
@@ -337,6 +338,7 @@ class Enemy:
                 ang = math.atan2(self.aim.y, self.aim.x)
                 g.add_fx("cone", self.pos, ang, 78, 0.16, (235, 235, 245), arc=130)
                 g.add_vfx("fx_sword", self.pos, ang, 1.15, 0.2, 28, follow=self, flip=random.random() < 0.5)
+                SFX.play("sword")
                 if in_cone(self.pos, ang, p, 78, 130, g.player.r):
                     g.hurt_player(10, self.pos)
                 self.cd = random.uniform(1.0, 1.4)
@@ -390,6 +392,7 @@ class Enemy:
             busy = sum(1 for e in g.enemies if e is not self and e.kind == "dog" and e.state in ("windup", "lunge"))
             if busy < 2:
                 self.state = "windup"
+                SFX.play("bark")
                 self.windup = 0.4
                 self.aim = dirv
 
@@ -401,6 +404,7 @@ class Enemy:
                 self.aim = norm(p + g.player.vel * 0.45 - self.pos)
             if self.windup <= 0:
                 g.ebullets.append(Proj("ebullet", self.pos + self.aim * 22, self.aim * 360, 8, 6, 3.2, friendly=False))
+                SFX.play("gunshot")
                 self.cd = random.uniform(1.8, 2.6)
                 self.fired_t = 0.16
             return
@@ -420,6 +424,7 @@ class Enemy:
                 self.cd = 0.35
             else:
                 self.windup = 0.5
+                SFX.play("aim")
                 self.aim = norm(p + g.player.vel * 0.45 - self.pos)
                 g.gun_cd = 0.8
 
@@ -641,6 +646,7 @@ class Boss(Enemy):
     def on_strike(self, g, d):
         p = g.player
         a = self.attack
+        SFX.play("slam" if a == "slam" else ("rain_warn" if a == "rain" else "boss_swing"))
         if a == "slam":
             g.add_vfx("fx_crack", self.pos + self.aim * 70, random.uniform(0, math.tau), 1.0, 3.2, 0, ground=True, fade=1.2,
                       frame=random.randrange(2))
@@ -963,6 +969,7 @@ class Player:
         self.blood = min(BLOOD_MAX, self.blood + amount)
         if self.blood >= BLOOD_MAX and not self.frenzy:
             self.frenzy = True
+            SFX.play("frenzy")
             g.add_text(self.pos + V2(0, -40), "FRENESI!", (255, 80, 80), 1.4, 28)
             g.add_fx("ring", self.pos, 0, 220, 0.5, (255, 60, 60))
             g.shake = max(g.shake, 10)
@@ -1012,6 +1019,7 @@ class Player:
 
     def update_dash(self, g, dt):
         d = self.dash
+        d["t"] = d.get("t", 0.0) + dt   # tempo desde o início (para a animação do dash)
         self.ghost_t -= dt
         if self.ghost_t <= 0:  # rastro de "fantasmas" da vampira
             self.ghost_t = 0.04
@@ -1047,12 +1055,14 @@ class Player:
         if d["kind"] == "leap":
             if landed:
                 g.add_vfx("fx_punch", self.pos, random.uniform(0, math.tau), 0.8, 0.28, 14)
+                SFX.play("punch")
                 g.aoe(self.pos, 75, 16 * POWER_DMG[d.get("power", 1) - 1], 320, 0.4, (110, 165, 255))
             return
         self.vel = d["dir"] * 80
         if d.get("burst"):
             g.tooth_ring(self.pos, d["burst"][0], d["burst"][1])
             self.play("spit")
+            SFX.play("spit")
             g.hud_spit("tooth", 5)
 
     # ---- desenho
@@ -1072,6 +1082,7 @@ class Player:
         t, speed = self.anim_t, 1.0
         if self.dash:
             base = "dash_strike" if self.dash.get("dmg", 0) > 0 else "dash"
+            t = self.dash.get("t", 0.0)
         else:
             base = None
             if self.action:
@@ -1098,7 +1109,7 @@ class Player:
         if self.bat:
             SP.shadow(s, sp, 11, 3.5, 80)
         else:
-            SP.shadow(s, (sp.x, sp.y + 1), 15, 5)
+            SP.shadow(s, (sp.x, sp.y + 1), 19, 6)
 
     def draw_bat(self, s, sp, g, A):
         if g.state == "over":
@@ -1128,8 +1139,8 @@ class Player:
             s.blit(img, (round(gp.x - ax), round(gp.y - ay)))
         if self.frenzy:
             pulse = 0.5 + 0.5 * math.sin(g.time * 12)
-            gl = SP.glow(56, (255, 30, 50), 150 + 10 * int(pulse * 6))
-            s.blit(gl, gl.get_rect(center=(sp.x, sp.y - 42)), special_flags=pygame.BLEND_ADD)
+            gl = SP.glow(62, (255, 30, 50), 150 + 10 * int(pulse * 6))
+            s.blit(gl, gl.get_rect(center=(sp.x, sp.y - 50)), special_flags=pygame.BLEND_ADD)
         blink = self.invuln > 0 and self.flash <= 0 and int(g.time * 30) % 2 == 0
         A.blit(s, "vampire", idx, sp, flip, self.flash > 0, alpha=110 if blink else None)
         if self.frenzy:  # olhos brilhando
@@ -1139,7 +1150,7 @@ class Player:
                 s.blit(gl, gl.get_rect(center=(sp.x + ex, sp.y + ey)), special_flags=pygame.BLEND_ADD)
         for i, _ in enumerate(self.mouth):  # tiros guardados na boca orbitando
             a = g.time * 3 + i * 2.1
-            pos = (sp.x + math.cos(a) * 24, sp.y - 44 + math.sin(a) * 9)
+            pos = (sp.x + math.cos(a) * 26, sp.y - 58 + math.sin(a) * 9)
             img = A.single("bullet", 0)
             s.blit(img, img.get_rect(center=(round(pos[0]), round(pos[1]))))
 
@@ -1331,6 +1342,8 @@ class Game:
                 self.add_element(KEY_ELEMENTS[ev.key])
             elif ev.key in (pygame.K_r, pygame.K_BACKSPACE):
                 self.clear_queue()
+            elif ev.key == pygame.K_m:
+                SFX.toggle_mute()
         elif ev.type == pygame.MOUSEBUTTONDOWN:
             if self.state in ("menu", "over") and ev.button == 1:
                 self.start()
@@ -1408,6 +1421,7 @@ class Game:
         self.blood_burst(p.pos, 8)
         if p.bat:  # morcego morre com 1 golpe
             self.blood_burst(p.pos, 24, 260)
+            SFX.play("death")
             self.game_over()
             return True
         p.blood -= dmg
@@ -1416,6 +1430,7 @@ class Game:
         self.hit_spark(p.pos, 34, dmg, gold=True)
         p.vel += norm(p.pos - src) * knock
         p.play("hurt")
+        SFX.play("hurt")
         self.phurt_t = 0.35
         self.add_text(p.pos + V2(0, -30), "-%d" % dmg, (255, 90, 110), 0.7, 22)
         if p.blood <= 0 and not p.frenzy:
@@ -1482,6 +1497,7 @@ class Game:
         p = self.player
         if p.bat or self.state != "play":
             return
+        SFX.play("bat")
         p.bat = True
         p.blood = 0.0
         p.r = 10
@@ -1497,6 +1513,7 @@ class Game:
 
     def revert_human(self):
         p = self.player
+        SFX.play("revert")
         p.bat = False
         p.r = 14
         p.blood = BAT_REVERT_BLOOD
@@ -1506,6 +1523,7 @@ class Game:
 
     def bite(self):
         p = self.player
+        SFX.play("bite")
         a = self.aim()
         face = math.atan2(a.y, a.x)
         p.vel += a * 520  # bote para frente
@@ -1535,8 +1553,10 @@ class Game:
         self.hit_spark(e.pos, self.SPARK_Z.get(e.kind, 34), dmg, gold=self.player.frenzy)
         self.blood_burst(e.pos, 5)
         self.shake = max(self.shake, 3)
+        SFX.play("hit")
         if e.hp <= 0:
             e.dead = True
+            SFX.play("kill")
             self.kills += 1
             if self.player.bat:
                 self.revert_human()
@@ -1600,6 +1620,7 @@ class Game:
         p = self.player
         p.mouth.pop()
         p.play("spit")
+        SFX.play("spit_back")
         self.hud_spit("bullet", 1)
         a = self.aim()
         self.projs.append(Proj("bullet", p.pos + a * 22, a * 950, 34, 8, 1.4, pierce=1, knock=220))
@@ -1623,6 +1644,7 @@ class Game:
         self.add_fx("ring", p.pos, 0, PARRY_RADIUS, 0.35, (255, 220, 120))
         self.add_text(p.pos + V2(0, -70), "PARRY!", (255, 225, 120), 1.0, 26)
         p.play("chomp")
+        SFX.play("chomp")
         self.add_vfx("fx_bite", p.pos + self.aim() * 22, 0.0, 1.7, 0.32, 48, follow=p)
         self.shake = max(self.shake, 6)
         return True
@@ -1637,15 +1659,18 @@ class Game:
                 return 0.4
             self.projs.append(Proj("tooth", p.pos + a * 20, a * 740, 12 * m, 6 * s, 1.0, pierce=power - 1))
             p.play("spit")
+            SFX.play("spit")
             self.hud_spit("tooth", power)
             return 0.28
         if key == "A":
             self.cone(p.pos, face, 82 * s, 130, 16 * m, 260, 0.15, ELEM_COLOR[ARM])
             p.play("punch")
+            SFX.play("claw")
             p.claw_flip = not p.claw_flip  # alterna o sentido das garras a cada golpe
             self.add_vfx("fx_claw", p.pos, face, 1.1 * s, 0.24, 24, follow=p, flip=p.claw_flip)
             return 0.4
         if key == "L":
+            SFX.play("dash")
             p.dash = {"kind": "dash", "dir": a, "left": 230 + 60 * (power - 1), "speed": 1300,
                       "dmg": 0, "knock": 0, "stun": 0, "hit": set()}
             return 0.65
@@ -1655,6 +1680,7 @@ class Game:
             self.projs.append(pr)
             p.leap_power = power
             p.play("spit")
+            SFX.play("spit")
             self.hud_spit("leg", 1)
             return 0.8
         if key == "TA":  # braço bumerangue
@@ -1666,14 +1692,18 @@ class Game:
                 pr.maxdist = 380 + 40 * power
                 self.projs.append(pr)
             p.play("throw")
+            SFX.play("throw")
             return 0.9
         if key == "LT":  # dash + chuva de dentes
             count = (8, 12, 16)[power - 1]
+            SFX.play("dash")
             p.dash = {"kind": "dash", "dir": a, "left": 220 + 40 * (power - 1), "speed": 1300,
                       "dmg": 0, "knock": 0, "stun": 0, "hit": set(),
                       "burst": (count, 8 * (1 + 0.25 * (power - 1)))}
             return 0.9
         if key == "LA":  # dash com golpe à frente
+            SFX.play("dash")
+            SFX.play("kick")
             p.dash = {"kind": "dash", "dir": a, "left": 250 + 50 * (power - 1), "speed": 1350,
                       "dmg": 18 * m, "knock": 430, "stun": 0.35, "hit": set()}
             self.add_vfx("fx_kick", p.pos, face, 0.75, 0.24, 18, follow=p)
@@ -1681,10 +1711,12 @@ class Game:
         if key == "AL":  # chute
             self.cone(p.pos, face, 100 * s, 80, 14 * m, 720, 0.8, (255, 200, 120))
             p.play("kick")
+            SFX.play("kick")
             self.add_vfx("fx_kick", p.pos, face, 1.05 * s, 0.26, 16, follow=p, flip=random.random() < 0.5)
             return 0.7
         if key == "AT":  # soco com dente em área
             p.play("punch")
+            SFX.play("punch")
             center = p.pos + a * 62
             self.add_vfx("fx_punch", center, random.uniform(0, math.tau), 0.98 * s, 0.3, 20)
             self.aoe(center, 92 * s, 24 * m, 400, 0.3, (250, 235, 200))
@@ -1699,6 +1731,7 @@ class Game:
     # ---- atualização
     def start_wave(self, n):
         self.wave = n
+        SFX.play("wave")
         swords = 3 + 3 * n
         guns = 0 if n == 1 else min(10, n + 1)
         dogs = 0 if n == 1 else min(8, n)
@@ -1725,6 +1758,7 @@ class Game:
             pos = V2(120, 120)
         if kind == "boss":
             self.enemies.append(Boss(pos, 450 + 40 * self.wave))
+            SFX.play("roar")
         else:
             self.enemies.append(Enemy(kind, pos))
 
@@ -1738,6 +1772,7 @@ class Game:
             if not self.announced and self.wave > 0:
                 self.announced = True
                 self.banner = ("Onda %d concluída!" % self.wave, 2.0)
+                SFX.play("clear")
                 self.break_t = 3.0
             self.break_t -= dt
             if self.break_t <= 0:
@@ -1901,6 +1936,7 @@ class Game:
             h["t"] -= dt
             if h["t"] <= 0 and not h["done"]:
                 h["done"] = True
+                SFX.play("slam", 0.55)
                 self.add_fx("ring", h["pos"], 0, h["r"], 0.35, (255, 150, 60))
                 self.add_fx("disc", h["pos"], 0, h["r"], 0.18, (255, 120, 50))
                 self.add_vfx("fx_crack", h["pos"], random.uniform(0, math.tau), 0.6, 2.2, 0, ground=True, fade=0.9,
@@ -2258,7 +2294,7 @@ class Game:
                 draw_text(s, "%s: %s" % (k, ELEM_LABEL[e]), 15, (225, 210, 220), (bx + 34, by), "midleft")
                 bx += 150
             draw_text(s, "Ela segue o mouse (segure o BOTÃO ESQ. para ficar parada)   Barra cheia lança sozinha   "
-                         "ESPAÇO ou BOTÃO DIR.: lançar já   R: limpar   P: pausa", 13, (180, 165, 185), (W / 2, H - 12), "midbottom")
+                         "ESPAÇO ou BOTÃO DIR.: lançar já   R: limpar   M: som   P: pausa", 13, (180, 165, 185), (W / 2, H - 12), "midbottom")
 
         if self.banner[1] > 0:
             k = min(1.0, self.banner[1])
@@ -2335,7 +2371,9 @@ class Game:
 
 # --------------------------------------------------------------------- main
 def main():
+    pygame.mixer.pre_init(22050, -16, 1, 512)
     pygame.init()
+    SFX.init()
     screen = pygame.display.set_mode((W, H), pygame.SCALED | pygame.RESIZABLE)
     pygame.display.set_caption("Vampirinha")
     pygame.mouse.set_visible(False)

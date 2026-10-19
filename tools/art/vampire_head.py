@@ -8,17 +8,17 @@ import math
 from .kit import P, add, bezier_pts, lerp2, mix, rot, tapered
 
 # ------------------------------------------------------------------ paleta
-SKIN = "#fff1ef"
-SKIN_SH = "#f2c8cf"
-SKIN_SH2 = "#e3a9b6"
-SKIN_LINE = "#7a3346"
+SKIN = "#efe4f1"
+SKIN_SH = "#cdb9d8"
+SKIN_SH2 = "#ad97c0"
+SKIN_LINE = "#4a2a4a"
 BLUSH = "#ff7d98"
 
-HAIR = "#eee8f8"
-HAIR_SH = "#c6bae2"
-HAIR_SH2 = "#9a8cc6"
-HAIR_LINE = "#4b3a72"
-HAIR_SHINE = "#ffffff"
+HAIR = "#2c2333"
+HAIR_SH = "#1c1622"
+HAIR_SH2 = "#130e18"
+HAIR_LINE = "#07040a"
+HAIR_SHINE = "#8c7aa8"
 
 EYE_LINE = "#2a0a1c"
 IRIS_TOP = "#3d0016"
@@ -326,7 +326,7 @@ def skin_tones(pale):
     return mix(SKIN, "#d8def0", pale), mix(SKIN_SH, "#aeb6d4", pale)
 
 
-def draw_head_front(pen, expr=None, sway=0.0, detail=False, pale=0.0, ear=True, tails=True, glow=False,
+def draw_head_front(pen, expr=None, sway=0.0, detail=False, pale=0.0, ear=True, tails=False, glow=False,
                     tail_sway=0.0, ahoge=0.0, part="all"):
     """Desenha a cabeça (3/4 de frente) com centro em (0, 0).
 
@@ -344,8 +344,8 @@ def draw_head_front(pen, expr=None, sway=0.0, detail=False, pale=0.0, ear=True, 
 
 
 def _back_hair(pen):
-    back = P().M(-17.5, -6).C(-19.8, 8, -19, 20, -14, 27).L(-10, 23).L(-6, 28).L(-1.5, 23.5).L(3, 28.5).L(7.5, 23).L(12, 26.5) \
-        .C(17, 19, 19.8, 6, 18, -6).C(16, -20, -15, -21, -17.5, -6).Z()
+    back = P().M(-17.5, -6).C(-21.5, 10, -22, 26, -18, 40).L(-12, 35).L(-7, 42).L(-1.5, 36).L(4, 42.5).L(9, 35.5).L(14, 40) \
+        .C(19, 26, 20.5, 8, 18, -6).C(16, -20, -15, -21, -17.5, -6).Z()
     pen.shape(back, HAIR_SH, HAIR_LINE, 0.8)
     with pen.clip(back):
         pen.fill(P().oval(0, 22, 17, 9), HAIR_SH2, alpha=200)
@@ -462,10 +462,24 @@ def _face_front(pen, expr, detail, pale, ear, tails, glow, ahoge, skin, skin_sh)
         bat_clip(pen, 16.4, -12.0, 0.8, 1, 0.3)
 
 
+def long_lock(pen, root, length, flip, sway=0.0):
+    """Mecha comprida e solta caindo do lado da cabeça (cabelo preto da referência)."""
+    pts = bezier_pts(root, (root[0] + flip * 5.0, root[1] + length * 0.3), (root[0] + flip * 6.0 + sway * 4, root[1] + length * 0.7),
+                     (root[0] + flip * 3.0 + sway * 8, root[1] + length), 12)
+    body = tapered(pts, 9.0, 1.0, 11.0)
+    pen.fill(body, HAIR)
+    with pen.clip(body):
+        pen.fill(tapered([(x - flip * 2.6, y) for x, y in pts], 6.0, 0.6, 7.0), HAIR_SH)
+        for off in (-2.0, 1.8):
+            pen.stroke(P().smooth([(x + flip * off, y) for x, y in pts[1:-2]], close=False), HAIR_SH2, 0.5, alpha=220)
+        pen.fill(tapered([(x + flip * 2.0, y) for x, y in pts[2:6]], 0.4, 0.3, 1.5), HAIR_SHINE, alpha=200)
+    pen.stroke(body, HAIR_LINE, 0.8)
+
+
 def draw_tails_front(pen, sway=0.0, length=34.0):
-    """Mariachiquinhas (desenhadas atrás do corpo)."""
-    draw_twin_tail(pen, (14.5, -11.0), length * 0.92, +1, sway * 0.8, -0.12, shade_side=-1)
-    draw_twin_tail(pen, (-14.5, -10.0), length, -1, sway, 0.10, shade_side=1)
+    """Cabelo comprido solto dos dois lados (desenhado atrás do corpo)."""
+    long_lock(pen, (14.0, -6.0), length * 1.25, +1, sway * 0.8)
+    long_lock(pen, (-14.0, -5.0), length * 1.32, -1, sway)
 
 
 # ------------------------------------------------------------------ cabeça de costas (3/4)
@@ -511,8 +525,8 @@ def draw_head_back(pen, sway=0.0, ear=True, ahoge=0.0, part="all", pale=0.0):
 
 
 def draw_tails_back(pen, sway=0.0, length=34.0):
-    draw_twin_tail(pen, (-14.8, -9.0), length, -1, sway, 0.05, shade_side=1)
-    draw_twin_tail(pen, (14.8, -9.0), length, +1, sway * 0.9, -0.05, shade_side=-1)
+    long_lock(pen, (-14.0, -5.0), length * 1.3, -1, sway)
+    long_lock(pen, (14.0, -5.0), length * 1.3, +1, sway * 0.9)
 
 
 # ------------------------------------------------------------------ expressões prontas
