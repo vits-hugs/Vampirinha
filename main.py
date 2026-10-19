@@ -37,6 +37,10 @@ FRENZY_DAMAGE = 1.5
 PARRY_RADIUS = 230
 MAX_ALIVE = 30
 PROJ_Z = 32                    # altura (px) em que os projéteis voam, para a vista 3/4
+AIM_Z = 28                     # o cursor aponta para a altura do corpo: o alvo no chão fica 28 px abaixo dele
+FOLLOW_STOP = 30               # cursor a menos disso (do alvo no chão) dela: ela fica parada
+FOLLOW_RAMP = 60               # depois dessa faixa ela já anda na velocidade máxima
+KEY_ELEMENTS = {pygame.K_q: ARM, pygame.K_w: LEG, pygame.K_e: TOOTH}
 PORTRAIT_POS = (6, 2)          # canto do retrato no HUD
 BAR_POS = (138, 72)            # moldura da barra de sangue
 
@@ -977,7 +981,7 @@ class Player:
         for gh in self.ghosts:
             gh[3] -= dt
         self.ghosts = [gh for gh in self.ghosts if gh[3] > 0]
-        d = g.mouse - self.pos
+        d = g.cursor_ground() - self.pos
         if d.length() > 4:
             self.facing = math.atan2(d.y, d.x)
         resting = g.resting()    # entre as ondas o sangue (e o frenesi) não escorrem
@@ -1156,6 +1160,7 @@ class Game:
         self.state = "menu"
         self.camera = V2()
         self.first_wave = 1
+        self.hold_still = False  # botão esquerdo apertado: ela não sai do lugar
         self.reset()
 
     # ---- preparação
@@ -1270,11 +1275,8 @@ class Game:
             self.cast()
 
     def right_click(self):
-        """Botão direito: elemento perna; na forma de morcego, morder."""
-        if self.player.bat:
-            self.cast()
-        else:
-            self.add_element(LEG)
+        """Botão direito: lança já a fila (ou cospe o tiro guardado); na forma de morcego, morde."""
+        self.cast()
 
     def space_action(self):
         """ESPAÇO: lança já a fila incompleta, ou cospe de volta o tiro guardado."""
@@ -1284,9 +1286,57 @@ class Game:
     def clear_queue(self):
         self.player.queue.clear()
 
+    def cursor_ground(self):
+        """Ponto do chão "embaixo" do cursor: na vista 3/4 o cursor fica na altura do corpo
+        (de quem ela mira, ou dela mesma), então o alvo no chão está um pouco abaixo dele."""
+        return self.mouse + V2(0, AIM_Z)
+
     def aim(self):
         p = self.player
-        return norm(self.mouse - p.pos, (math.cos(p.facing), math.sin(p.facing)))
+        return norm(self.cursor_ground() - p.pos, (math.cos(p.facing), math.sin(p.facing)))
+
+    def follow_move(self):
+        """Ela segue o mouse: anda até o cursor e para quando ele está em cima dela
+        (ou enquanto o botão esquerdo está apertado, para mirar sem sair do lugar)."""
+        if self.state != "play" or self.hold_still:
+            return V2()
+        d = self.cursor_ground() - self.player.pos
+        dist = d.length()
+        if dist <= FOLLOW_STOP:
+            return V2()
+        return d / dist * min(1.0, (dist - FOLLOW_STOP) / FOLLOW_RAMP)
+
+    def handle_event(self, ev):
+        """Teclado e mouse. Devolve "quit" quando o jogo deve fechar."""
+        if ev.type == pygame.QUIT:
+            return "quit"
+        if ev.type == pygame.KEYDOWN:
+            if ev.key == pygame.K_F11:
+                try:
+                    pygame.display.toggle_fullscreen()
+                except pygame.error:
+                    pass
+            elif self.state in ("menu", "over") and ev.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                self.start()
+            elif ev.key in (pygame.K_p, pygame.K_ESCAPE):
+                if self.state == "play":
+                    self.state = "pause"
+                elif self.state == "pause":
+                    self.state = "play"
+                elif ev.key == pygame.K_ESCAPE:
+                    return "quit"
+            elif ev.key == pygame.K_SPACE:
+                self.space_action()
+            elif ev.key in KEY_ELEMENTS:
+                self.add_element(KEY_ELEMENTS[ev.key])
+            elif ev.key in (pygame.K_r, pygame.K_BACKSPACE):
+                self.clear_queue()
+        elif ev.type == pygame.MOUSEBUTTONDOWN:
+            if self.state in ("menu", "over") and ev.button == 1:
+                self.start()
+            elif ev.button == 3:
+                self.right_click()
+        return None
 
     # ---- efeitos visuais
     def add_fx(self, kind, pos, ang, radius, life, color, arc=90):
@@ -2133,7 +2183,7 @@ class Game:
             for i in range(len(p.mouth)):
                 img = A.single("bullet", 0)
                 s.blit(img, img.get_rect(center=(x0 + 56 + i * 20, by + 61)))
-            draw_text(s, "ESPAÇO com a fila vazia: cuspir de volta", 13, (230, 200, 160), (x0 + 56 + 3 * 20, by + 53))
+            draw_text(s, "ESPAÇO ou BOTÃO DIR. com a fila vazia: cuspir de volta", 13, (230, 200, 160), (x0 + 56 + 3 * 20, by + 53))
         elif self.resting() and self.state == "play" and not p.bat:
             draw_text(s, "sangue em pausa entre as ondas", 13, (205, 175, 190), (bx + 30, by + 52))
 
@@ -2198,16 +2248,17 @@ class Game:
         # legenda de teclas
         by = H - 48
         if p.bat:
-            draw_text(s, "BOTÃO DIR.: morder   WASD: voar   P: pausa", 14, (180, 165, 185), (W / 2, H - 12), "midbottom")
+            draw_text(s, "Ele segue o mouse   BOTÃO DIR.: morder   P: pausa", 14, (180, 165, 185), (W / 2, H - 12), "midbottom")
         else:
-            items = [(TOOTH, "SHIFT"), (ARM, "BOTÃO ESQ."), (LEG, "BOTÃO DIR.")]
-            bx = W / 2 - 330
+            items = [(ARM, "Q"), (LEG, "W"), (TOOTH, "E")]
+            bx = W / 2 - 215
             for e, k in items:
                 icon = self.scaled(A.single("icons", order.index(e)), "icon" + e, (30, 30))
                 s.blit(icon, icon.get_rect(center=(bx + 14, by)))
                 draw_text(s, "%s: %s" % (k, ELEM_LABEL[e]), 15, (225, 210, 220), (bx + 34, by), "midleft")
-                bx += 190
-            draw_text(s, "Barra cheia lança sozinha   ESPAÇO: lançar já   Q: limpar   P: pausa", 14, (180, 165, 185), (W / 2, H - 12), "midbottom")
+                bx += 150
+            draw_text(s, "Ela segue o mouse (segure o BOTÃO ESQ. para ficar parada)   Barra cheia lança sozinha   "
+                         "ESPAÇO ou BOTÃO DIR.: lançar já   R: limpar   P: pausa", 13, (180, 165, 185), (W / 2, H - 12), "midbottom")
 
         if self.banner[1] > 0:
             k = min(1.0, self.banner[1])
@@ -2227,9 +2278,9 @@ class Game:
         draw_text(s, "VAMPIRINHA", 84, (210, 25, 50), (W / 2, 70), "midtop", True)
         draw_text(s, "O sangue é a sua vida — e o seu relógio. Cause dano para se manter de pé (ele pausa entre as ondas).", 20, (235, 215, 220), (W / 2, 168), "midtop")
         col1 = [
-            "MOVER: W A S D        MIRAR: mouse",
-            "SHIFT = dente     BOTÃO ESQUERDO = braço     BOTÃO DIREITO = perna",
-            "Com 3 elementos a barra enche e a habilidade é lançada sozinha. ESPAÇO lança antes (Q limpa).",
+            "MOVER e MIRAR: ela segue o mouse (cursor em cima dela ou BOTÃO ESQUERDO segurado: fica parada)",
+            "Q = braço     W = perna     E = dente",
+            "Com 3 elementos a barra enche e a habilidade é lançada sozinha. ESPAÇO ou BOTÃO DIREITO lança antes (R limpa).",
             "O 1º elemento define a ação; repetir fortalece; misturar faz as duas coisas.",
             "A cada 5 ondas surge um GIGANTE: fuja das áreas vermelhas no chão.",
         ]
@@ -2245,7 +2296,7 @@ class Game:
             ("braço + dente", "soco com dente em área"),
             ("dente + perna", "cospe a perna; se acertar, pula até o inimigo"),
             ("dente + braço", "arremessa o braço como bumerangue"),
-            ("dente, dente, dente", "PARRY: come o tiro que vem (ESPAÇO p/ devolver)"),
+            ("dente, dente, dente", "PARRY: come o tiro que vem (ESPAÇO ou BOTÃO DIR. p/ devolver)"),
         ]
         y0 = 356
         for i, (k, d) in enumerate(combos):
@@ -2295,48 +2346,20 @@ def main():
             game.first_wave = max(1, int(sys.argv[sys.argv.index("--wave") + 1]))
         except (IndexError, ValueError):
             pass
-    elem_keys = {pygame.K_LSHIFT: TOOTH, pygame.K_RSHIFT: TOOTH}
 
     while True:
         dt = min(clock.tick(FPS) / 1000.0, 0.05)
         for ev in pygame.event.get():
-            if ev.type == pygame.QUIT:
+            if game.handle_event(ev) == "quit":
                 pygame.quit()
                 sys.exit()
-            elif ev.type == pygame.KEYDOWN:
-                if ev.key == pygame.K_F11:
-                    pygame.display.toggle_fullscreen()
-                elif game.state in ("menu", "over") and ev.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
-                    game.start()
-                elif ev.key in (pygame.K_p, pygame.K_ESCAPE):
-                    if game.state == "play":
-                        game.state = "pause"
-                    elif game.state == "pause":
-                        game.state = "play"
-                    elif ev.key == pygame.K_ESCAPE:
-                        pygame.quit()
-                        sys.exit()
-                elif ev.key == pygame.K_SPACE:
-                    game.space_action()
-                elif ev.key in elem_keys:
-                    game.add_element(elem_keys[ev.key])
-                elif ev.key == pygame.K_q:
-                    game.clear_queue()
-            elif ev.type == pygame.MOUSEBUTTONDOWN:
-                if game.state in ("menu", "over") and ev.button == 1:
-                    game.start()
-                elif ev.button == 1:
-                    game.add_element(ARM)
-                elif ev.button == 3:
-                    game.right_click()
 
-        keys = pygame.key.get_pressed()
-        move = V2(keys[pygame.K_d] - keys[pygame.K_a], keys[pygame.K_s] - keys[pygame.K_w])
-        if move.length() > 0:
-            move = move.normalize()
         mx, my = pygame.mouse.get_pos()
         cam = game.camera
         game.mouse = V2(mx, my) + V2(int(cam.x), int(cam.y))
+        game.hold_still = bool(pygame.mouse.get_pressed()[0])
+        # ela segue o mouse (e para se o cursor sair da janela)
+        move = game.follow_move() if pygame.mouse.get_focused() else V2()
         if game.state != "pause":
             game.update(dt, move)
         game.draw(screen, (mx, my))

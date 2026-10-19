@@ -29,7 +29,7 @@ def fresh():
     g.break_t = 999
     g.enemies.clear()
     g.player.blood = 60
-    g.mouse = g.player.pos + V2(300, 0)
+    g.mouse = g.player.pos + V2(300, -vamp.AIM_Z)
     return g
 
 
@@ -380,16 +380,105 @@ def test_full_bar_waits_for_cooldown():
     assert not g.player.queue, "lanca assim que a recarga termina"
 
 
-def test_right_click_is_leg_and_bat_bites():
+def key(g, k):
+    return g.handle_event(pygame.event.Event(pygame.KEYDOWN, key=k, mod=0, unicode="", scancode=0))
+
+
+def click(g, button):
+    return g.handle_event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=button, pos=(0, 0)))
+
+
+def test_q_w_e_are_arm_leg_tooth_and_r_clears():
     g = fresh()
+    g.enemies.append(Enemy("sword", g.player.pos + V2(900, 900)))
+    key(g, pygame.K_q)
+    key(g, pygame.K_w)
+    assert g.player.queue == [ARM, LEG], "Q = braço, W = perna"
+    key(g, pygame.K_r)
+    assert not g.player.queue, "R limpa a fila"
+    key(g, pygame.K_e)
+    key(g, pygame.K_e)
+    assert g.player.queue == [TOOTH, TOOTH], "E = dente"
+    key(g, pygame.K_e)
+    assert not g.player.queue and g.projs, "o terceiro enche a barra e lança sozinho"
+    for k in (pygame.K_a, pygame.K_s, pygame.K_d, pygame.K_LSHIFT):
+        key(g, k)
+    assert not g.player.queue, "as teclas antigas não fazem mais nada"
+    click(g, 1)
+    assert not g.player.queue, "botão esquerdo não põe elemento"
+
+
+def test_mouse_buttons_and_quit():
+    g = fresh()
+    g.enemies.append(Enemy("sword", g.player.pos + V2(900, 900)))
+    key(g, pygame.K_e)
+    click(g, 3)
+    assert not g.player.queue and any(pr.kind == "tooth" for pr in g.projs), "botão direito lança já"
+    g2 = Game()
+    assert key(g2, pygame.K_ESCAPE) == "quit"
+    assert g2.handle_event(pygame.event.Event(pygame.QUIT)) == "quit"
+    click(g2, 1)
+    assert g2.state == "play", "clique começa o jogo"
+    key(g2, pygame.K_p)
+    assert g2.state == "pause"
+    key(g2, pygame.K_ESCAPE)
+    assert g2.state == "play"
+
+
+def test_follows_the_mouse():
+    g = fresh()
+    g.enemies.append(Enemy("sword", g.player.pos + V2(900, 900)))
+    p = g.player
+    g.mouse = p.pos + V2(0, -vamp.AIM_Z)  # cursor em cima dela: parada
+    assert g.follow_move().length() == 0
+    g.mouse = p.pos + V2(10, -vamp.AIM_Z - 15)
+    assert g.follow_move().length() == 0, "zona morta em volta dela"
+    g.mouse = p.pos + V2(400, -vamp.AIM_Z)
+    mv = g.follow_move()
+    assert abs(mv.length() - 1) < 1e-6 and mv.x > 0.99, "longe: velocidade máxima na direção do cursor"
+    g.mouse = p.pos + V2(vamp.FOLLOW_STOP + vamp.FOLLOW_RAMP / 2, -vamp.AIM_Z)
+    assert 0.3 < g.follow_move().length() < 0.7, "perto: desacelera"
+    g.hold_still = True
+    g.mouse = p.pos + V2(400, -vamp.AIM_Z)
+    assert g.follow_move().length() == 0, "botão esquerdo segurado: fica parada"
+    g.hold_still = False
+    # andando de verdade: chega até o cursor e para
+    target = p.pos + V2(250, 120)
+    g.mouse = target - V2(0, vamp.AIM_Z)
+    for _ in range(60 * 3):
+        g.player.blood = 60
+        g.update(DT, g.follow_move())
+    assert (p.pos - target).length() <= vamp.FOLLOW_STOP + 4, "parou em cima do cursor"
+    assert p.vel.length() < 40
+    g.state = "pause"
+    assert g.follow_move().length() == 0
+
+
+def test_aim_points_where_the_cursor_shows():
+    """Com o cursor no corpo de um inimigo (acima dos pés dele), o dente vai nele."""
+    g = fresh()
+    e = Enemy("sword", g.player.pos + V2(180, 0))
+    g.enemies.append(e)
+    g.mouse = e.pos - V2(0, vamp.AIM_Z)
+    a = g.aim()
+    assert abs(a.y) < 1e-6 and a.x > 0.99
+    cast(g, TOOTH)
+    step(g, 30)
+    assert e.hp < e.max_hp
+
+
+def test_right_click_casts_and_bat_bites():
+    g = fresh()
+    g.player.mouth = [1]
     g.right_click()
-    assert g.player.queue == [LEG]
+    assert any(pr.kind == "bullet" for pr in g.projs), "fila vazia: cospe o tiro de volta"
     g.enemies.append(Enemy("sword", g.player.pos + V2(900, 900)))
     e = Enemy("sword", g.player.pos + V2(45, 0))
     e.hp = 5
     g.enemies.append(e)
     g.become_bat()
     g.player.invuln = 0
+    g.player.cast_cd = 0  # o cuspe de volta tem uma recarga curta
     g.right_click()
     assert e.dead and not g.player.bat, "no morcego o botao direito morde"
 

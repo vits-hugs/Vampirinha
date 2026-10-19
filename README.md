@@ -28,7 +28,7 @@ Para rodar na mão: `pip install -r requirements.txt && python3 main.py` (precis
 
 Quando o sangue acaba, a vampira se transforma em morcego:
 
-- Só tem **um ataque: morder**, no **botão direito** (bote curto para a frente, em arco).
+- Só tem **um ataque: morder**, no **botão direito** (bote curto para a frente, em arco). Voa seguindo o mouse.
 - Voa mais rápido, mas **1 golpe e morre** (fim de jogo). Ao se transformar ela ganha só um respiro de
   0,6 s sem poder ser atingida.
 - O sangue fica congelado em zero e não dá para usar elementos.
@@ -38,22 +38,26 @@ Quando o sangue acaba, a vampira se transforma em morcego:
 
 | Ação | Tecla |
 | --- | --- |
-| Andar | `W` `A` `S` `D` |
+| **Andar** | **ela segue o mouse**: anda até o cursor e para quando ele está em cima dela |
+| Ficar parada mirando | segurar o botão esquerdo do mouse |
 | Mirar | mouse |
-| Elemento **dente** | `Shift` |
-| Elemento **braço** | botão esquerdo do mouse |
-| Elemento **perna** | botão direito do mouse |
+| Elemento **braço** | `Q` |
+| Elemento **perna** | `W` |
+| Elemento **dente** | `E` |
 | **Lançar** | **automático quando a barra de habilidades enche (3 elementos)**, na direção do ponteiro |
-| Lançar antes, com 1 ou 2 elementos | `Espaço` |
-| Cuspir de volta o tiro engolido no parry | `Espaço` com a fila vazia |
-| Limpar a fila | `Q` |
+| Lançar antes, com 1 ou 2 elementos | `Espaço` ou botão direito do mouse |
+| Cuspir de volta o tiro engolido no parry | `Espaço` ou botão direito com a fila vazia |
+| Limpar a fila | `R` (ou `Backspace`) |
 | **Morder** (só na forma de morcego) | botão direito do mouse |
 | Pausa | `P` ou `Esc` |
 | Tela cheia | `F11` |
 
+Na vista 3/4 o cursor fica na altura do corpo: o ponto do chão para onde ela anda (e mira) fica um pouco
+abaixo dele. Assim, com o cursor em cima de um inimigo o golpe vai nele, e com o cursor em cima dela ela para.
+
 Funciona como o Magicka: você empilha até **3 elementos** na barra de cima. **Quando a barra enche, a
 habilidade é lançada sozinha** (se ainda estiver em recarga, sai assim que terminar). Para lançar uma fila
-incompleta (por exemplo `dente + perna`), aperte `Espaço`. O nome do que vai sair aparece embaixo da barra.
+incompleta (por exemplo `dente + perna`), aperte `Espaço` (ou o botão direito). O nome do que vai sair aparece embaixo da barra.
 
 ## Elementos e combos
 
@@ -70,7 +74,7 @@ O **primeiro** elemento define a ação; o segundo (diferente) escolhe a variaç
 | braço + dente | **soco com dente** em área |
 | dente + perna | cospe a própria perna; se acertar um inimigo, a vampira **pula até ele** e causa dano em área |
 | dente + braço | joga o braço como **bumerangue** (acerta na ida e na volta) |
-| dente, dente, dente | **parry**: se houver tiro vindo na sua direção, ela **come o tiro** (e recupera sangue). Com a fila vazia, aperte `Espaço` para **cuspir o tiro de volta**. Sem tiro por perto, vira um dentão perfurante |
+| dente, dente, dente | **parry**: se houver tiro vindo na sua direção, ela **come o tiro** (e recupera sangue). Com a fila vazia, aperte `Espaço` (ou o botão direito) para **cuspir o tiro de volta**. Sem tiro por perto, vira um dentão perfurante |
 
 Regras de fila:
 
