@@ -6,3 +6,5 @@ pillow
 scipy
 soundfile
 trimesh
+scikit-image
+fast-simplification

@@ -155,20 +155,32 @@ python3 tools/make_sounds.py
 
 ## Modelo 3D
 
-`models/vampirinha.glb` é a personagem em 3D (glTF binário, ~39 mil triângulos, 1,62 m, Y para cima, olhando
-para +Z), feita a partir da folha de referência: cabelo preto comprido com franja, olhos vermelhos de anime,
-orelhas pontudas, presinha, vestido preto com saia vermelha, mangas bufantes, unhas vermelhas, capa preta forrada de
-vermelho com gola alta e botas de salto. Abre no Blender (Arquivo > Importar > glTF 2.0), Godot, Unity e em
-visualizadores web. Os materiais são separados por cor (pele, cabelo, olhos, tecido...), fáceis de trocar.
+`models/vampirinha.glb` é a personagem em 3D num estilo realista (glTF binário, ~370 mil triângulos, 1,62 m,
+Y para cima, olhando para +Z): pele pálida com textura, olhos vermelhos com córnea brilhante, cílios e sobrancelhas
+fio a fio, orelhas pontudas, cabelo preto em mechas até a cintura com franja reta, gargantilha com pingente, vestido
+de veludo preto com corpete vermelho de cadarço, saia de cetim com sobressaia aberta, botas de couro e capa preta
+forrada de vermelho com gola alta. Abre no Blender (Arquivo > Importar > glTF 2.0), Godot, Unity e em visualizadores
+web; os materiais são separados (pele, cabelo, olhos, veludo, cetim, couro...), fáceis de trocar.
 
-Ele é gerado por código em `tools/make_model.py` (precisa de `numpy` e `trimesh`):
+Como é feito (`tools/make_model.py`):
+
+- **corpo**: malha base do [MakeHuman](http://www.makehumancommunity.org/) com os ajustes de mulher jovem,
+  proporções ideais, orelhas pontudas e olhos um pouco maiores; os braços são baixados com o esqueleto padrão do
+  MakeHuman. Esses arquivos são CC0 (domínio público) e ficam em `tools/model3d/makehuman/`;
+- **pele, olhos, cílios e sobrancelhas**: textura pintada por código (lábios, sombra nos olhos, rubor, poros), íris
+  do MakeHuman recolorida de vermelho, cada cílio e cada fio da sobrancelha é uma fitinha;
+- **roupa**: o vestido é uma casca que acompanha o corpo com o decote alisado; saia e capa caem por cima do
+  "envelope" do corpo com godê e pregas; as botas são uma superfície implícita em volta do pé (dedos fundidos, sola reta);
+- **cabelo**: ~3.300 mechas com textura de fios (alfa), simuladas com gravidade e colisão com a cabeça, as orelhas,
+  a roupa e a capa.
 
 ```bash
-pip install numpy trimesh
+pip install -r tools/requirements.txt
 python3 tools/make_model.py
 ```
 
-O modelo ainda não tem esqueleto/rig nem animações: está numa pose parada.
+Se houver Node (`npx`), o gerador ainda passa o arquivo pelo glTF-Transform para quantizar a malha
+(`KHR_mesh_quantization`, ~30% menor). O modelo está numa pose parada (braços ao lado do corpo), sem rig nem animações.
 
 ## Estrutura
 
@@ -179,7 +191,7 @@ sounds.py            toca os efeitos sonoros de assets/sfx/
 assets/              folhas de sprites geradas (PNG) + sprites.json
 tools/make_assets.py gera a arte em assets/ (vampira recortada de tools/ref/, retratos, inimigos, efeitos...)
 tools/make_sounds.py gera os sons em assets/sfx/
-tools/make_model.py  gera o modelo 3D em models/vampirinha.glb
+tools/make_model.py  gera o modelo 3D em models/vampirinha.glb (tools/model3d/: MakeHuman, malhas, texturas)
 tests/test_smoke.py  testes sem janela das mecânicas e da arte (python tests/test_smoke.py)
 run.sh               atalho que cria o venv e roda
 ```
