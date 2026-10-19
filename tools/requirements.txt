@@ -1,0 +1,5 @@
+# Só para REGERAR a arte (python3 tools/make_assets.py). O jogo em si só precisa do pygame.
+# Testado com skia-python 144, numpy 2.5 e pillow 12.
+skia-python
+numpy
+pillow

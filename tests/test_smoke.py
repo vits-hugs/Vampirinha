@@ -15,6 +15,7 @@ from pygame.math import Vector2 as V2  # noqa: E402
 
 import main as vamp  # noqa: E402
 from main import ARM, LEG, TOOTH, Boss, Enemy, Game  # noqa: E402
+import sprites as SP  # noqa: E402
 
 pygame.init()
 screen = pygame.display.set_mode((vamp.W, vamp.H))
@@ -177,7 +178,7 @@ def test_waves_and_enemies_attack():
     g.start()
     step(g, 60 * 12)
     assert g.wave >= 1 and g.enemies
-    g.player.pos = V2(WORLD_CENTER := vamp.WORLD_W / 2, vamp.WORLD_H / 2)
+    g.player.pos = V2(vamp.WORLD_W / 2, vamp.WORLD_H / 2)
     for _ in range(60 * 30):
         g.update(DT, V2())
         if g.state != "play":
@@ -528,6 +529,224 @@ def test_boss_render_all_phases():
                 break
     b.enraged
     g.draw(screen, (640, 360))
+
+
+# ------------------------------------------------------------------ arte e HUD
+def test_assets_complete():
+    A = SP.get()
+    for name in ("vampire", "bat", "hunter", "gunner", "dog", "boss", "tooth", "tooth_hud", "leg", "leg_hud", "arm",
+                 "bullet", "bullet_back", "icons", "slot", "bar", "fist", "gun_arm", "muzzle", "props", "decals",
+                 "fx_claw", "fx_kick", "fx_punch", "fx_sword", "fx_bite", "fx_spark", "fx_spark_w", "fx_crack",
+                 "fx_shock", "disc", "streak"):
+        assert len(A.frames(name)) == A.meta[name]["count"], name
+    for view in ("front", "back"):
+        for anim in ("idle", "run", "punch", "kick", "spit", "throw", "dash", "dash_strike", "hurt", "chomp", "hop",
+                     "idle_na", "run_na", "hop_na"):
+            assert A.has_anim("vampire", view + "/" + anim), (view, anim)
+    for st in ("normal", "normal_blink", "normal_spit", "frenzy", "frenzy_blink", "frenzy_spit", "low", "low_blink",
+               "low_spit", "hurt", "dead", "bat"):
+        assert A.portrait(st) is not None and st in A.meta["portraits"]["mouth"], st
+    for n, keys in (("hunter", ("walk", "windup", "slash", "hurt", "dead")), ("gunner", ("walk", "aim", "hurt", "dead")),
+                    ("dog", ("run", "crouch", "lunge", "recover", "hurt", "dead")),
+                    ("boss", ("walk", "windup", "strike", "walk_rage", "windup_rage", "strike_rage", "dead")),
+                    ("bat", ("bat_fly", "bat_bite", "bat_die"))):
+        for k in keys:
+            assert A.has_anim(n, k), (n, k)
+
+
+def test_player_animation_follows_actions():
+    A = SP.get()
+    g = fresh()
+    cast(g, ARM)
+    assert g.player.action == "punch"
+    idx, flip = g.player.anim_state(g, A)
+    assert idx in A.anim("vampire", "front/punch")["frames"] and not flip
+    g.mouse = g.player.pos + V2(-100, -200)  # mirando para cima-esquerda: de costas e espelhada
+    step(g, 1)
+    g.player.anim_state(g, A)
+    assert g.player.view == "back" and g.player.flip
+    g2 = fresh()
+    g2.enemies.append(Enemy("sword", g2.player.pos + V2(900, 900)))
+    cast(g2, TOOTH, ARM)
+    assert g2.player.action == "throw"
+    step(g2, 30)  # arremesso terminou, o braço ainda está voando
+    idx, _ = g2.player.anim_state(g2, A)
+    assert idx in A.anim("vampire", "front/idle_na")["frames"] + A.anim("vampire", "front/run_na")["frames"]
+    g3 = fresh()
+    cast(g3, TOOTH, LEG)
+    step(g3, 20)  # perna voando: ela pula num pé só
+    idx, _ = g3.player.anim_state(g3, A)
+    assert idx in A.anim("vampire", "front/hop")["frames"]
+    g4 = fresh()
+    cast(g4, LEG)
+    step(g4, 2)
+    idx, _ = g4.player.anim_state(g4, A)
+    assert idx in A.anim("vampire", "front/dash")["frames"]
+    assert g4.player.ghosts, "dash deixa rastro"
+
+
+def test_hud_portrait_states_and_spit_particles():
+    import main
+    g = fresh()
+    g.enemies.append(Enemy("sword", g.player.pos + V2(900, 900)))
+    g.time = 1.0
+    assert g.portrait_state() == "normal"
+    cast(g, TOOTH)
+    assert g.portrait_state() == "normal_spit"
+    assert g.hud_parts and g.hud_parts[0]["kind"] == "tooth"
+    mouth = V2(main.PORTRAIT_POS) + V2(SP.get().meta["portraits"]["mouth"]["normal_spit"])
+    assert (g.hud_parts[0]["pos"] - mouth).length() < 1, "o dente sai da boca do retrato"
+    step(g, 5)
+    assert g.hud_parts[0]["pos"].x > mouth.x, "e voa para fora"
+    step(g, 60 * 2)
+    assert not g.hud_parts
+    g.spit_t = 0
+    g.player.blood = 10
+    assert g.portrait_state() in ("low", "low_blink")
+    g.player.add_blood(100, g)
+    assert g.portrait_state().startswith("frenzy")
+    g.player.frenzy = False
+    g.player.blood = 50
+    g.player.invuln = 0
+    g.hurt_player(5, g.player.pos + V2(10, 0))
+    assert g.portrait_state() == "hurt"
+    g.become_bat()
+    assert g.portrait_state() == "bat"
+    g.game_over()
+    assert g.portrait_state() == "dead"
+
+
+def test_leg_and_bullet_fly_out_of_portrait():
+    g = fresh()
+    cast(g, TOOTH, LEG)
+    assert any(h["kind"] == "leg" for h in g.hud_parts)
+    g2 = fresh()
+    g2.player.mouth = [1]
+    g2.space_action()
+    assert any(h["kind"] == "bullet" for h in g2.hud_parts)
+
+
+def test_corpse_left_on_death_then_fades():
+    g = fresh()
+    e = Enemy("dog", g.player.pos + V2(100, 0))
+    e.hp = 1
+    g.enemies.append(e)
+    g.damage_enemy(e, 5, g.player.pos)
+    assert g.corpses and g.corpses[0]["name"] == "dog"
+    step(g, 60 * 2)
+    assert not g.corpses
+
+
+def test_boss_fist_reaches_toward_target():
+    A = SP.get()
+    g, b, hits = boss_fresh(150)
+    b.start("jab", (g.player.pos - b.pos).normalize(), 1.0)
+    b.phase, b.pt = "strike", 0.0
+    sp = b.pos - g.camera
+    arms = b.arms_2d(A, sp)
+    punch = [a for a in arms if a["side"] == b.punch_side][0]
+    assert punch["fist"].x < sp.x - 100, "o punho vai na direção da vampira"
+    b.phase, b.attack = "walk", None
+    b.start("slam", (g.player.pos - b.pos).normalize(), 1.0)
+    b.pt = 0.0  # fim do aviso: punhos lá no alto
+    for a in b.arms_2d(A, sp):
+        assert a["fist"].y < sp.y - 150 and a["scale"] > 1.2
+
+
+# ------------------------------------------------------------------ efeitos de golpe
+def _vfx(g, name):
+    return [v for v in g.vfx if v["name"] == name]
+
+
+def test_attacks_spawn_drawn_effects():
+    g = fresh()
+    e = Enemy("sword", g.player.pos + V2(60, 0))
+    e.hp = 999
+    e.cd = 99
+    g.enemies.append(e)
+    cast(g, ARM)
+    claw = _vfx(g, "fx_claw")
+    assert claw and claw[0]["follow"] is g.player, "garras acompanham a vampira"
+    assert abs(claw[0]["ang"]) < 0.2, "na direção da mira"
+    assert _vfx(g, "fx_spark"), "acerto solta faísca"
+    flip0 = claw[0]["flip"]
+    cast(g, ARM)
+    assert _vfx(g, "fx_claw")[-1]["flip"] != flip0, "o sentido das garras alterna"
+    cast(g, ARM, LEG)
+    assert _vfx(g, "fx_kick")
+    cast(g, ARM, TOOTH)
+    punch = _vfx(g, "fx_punch")
+    assert punch and (punch[0]["pos"] - (g.player.pos + V2(62, 0))).length() < 2
+    cast(g, LEG, ARM)
+    assert len(_vfx(g, "fx_kick")) == 2, "voadora também tem o arco"
+    step(g, 60)
+    assert not g.vfx, "efeitos somem sozinhos"
+
+
+def test_frenzy_hits_spark_gold():
+    g = fresh()
+    e = Enemy("sword", g.player.pos + V2(60, 0))
+    e.hp = 999
+    g.enemies.append(e)
+    g.player.add_blood(100, g)
+    cast(g, ARM)
+    assert _vfx(g, "fx_spark_w") and not _vfx(g, "fx_spark")
+
+
+def test_enemy_and_boss_effects():
+    g = fresh()
+    h = Enemy("sword", g.player.pos + V2(50, 0))
+    h.cd = 0
+    h.role = "engage"
+    g.enemies.append(h)
+    for _ in range(40):
+        g.player.blood = 60
+        g.update(DT, V2())
+        if _vfx(g, "fx_sword"):
+            break
+    sw = _vfx(g, "fx_sword")
+    assert sw and sw[0]["follow"] is h
+    g2, b, hits = boss_fresh(150)
+    b.start("slam", (g2.player.pos - b.pos).normalize(), 1.0)
+    for _ in range(80):
+        g2.player.blood = 80
+        g2.update(DT, V2())
+    crack = _vfx(g2, "fx_crack")
+    assert crack and crack[0]["ground"] and crack[0]["frame"] in (0, 1)
+
+
+def test_parry_and_bat_bite_effects():
+    g = fresh()
+    g.enemies.append(Enemy("sword", g.player.pos + V2(900, 900)))
+    g.ebullets.append(vamp.Proj("ebullet", g.player.pos + V2(140, 0), V2(-360, 0), 8, 6, 3, friendly=False))
+    cast(g, TOOTH, TOOTH, TOOTH)
+    assert _vfx(g, "fx_bite"), "parry abre a bocona"
+    g2 = fresh()
+    g2.enemies.append(Enemy("sword", g2.player.pos + V2(900, 900)))
+    g2.become_bat()
+    g2.player.cast_cd = 0
+    g2.right_click()
+    assert _vfx(g2, "fx_bite")
+
+
+def test_effects_render_rotated_and_cached():
+    A = SP.get()
+    g = fresh()
+    g.enemies.append(Enemy("sword", g.player.pos + V2(900, 900)))
+    for ang in (0.0, 1.0, 2.5, -2.0):
+        g.mouse = g.player.pos + V2(math.cos(ang), math.sin(ang)) * 200
+        cast(g, ARM)
+        cast(g, ARM, LEG)
+        cast(g, TOOTH)
+        for _ in range(3):
+            g.update(DT, V2())
+            g.draw(screen, (640, 360))
+    assert A._fx, "quadros girados ficam em cache"
+    a = A.fx_image("fx_claw", 1, 0.0)
+    b = A.fx_image("fx_claw", 1, math.pi / 4)
+    assert b.get_width() > a.get_width(), "girar 45 graus alarga a imagem"
+    A.shock_ring(screen, (300, 300), 120, (255, 60, 60), 200)
+    assert A.disc((10, 20, 30), 12).get_at((20, 20))[:3] == (10, 20, 30)
 
 
 def test_render_all_states():

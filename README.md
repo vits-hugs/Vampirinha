@@ -70,7 +70,7 @@ O **primeiro** elemento define a ação; o segundo (diferente) escolhe a variaç
 | braço + dente | **soco com dente** em área |
 | dente + perna | cospe a própria perna; se acertar um inimigo, a vampira **pula até ele** e causa dano em área |
 | dente + braço | joga o braço como **bumerangue** (acerta na ida e na volta) |
-| dente, dente, dente | **parry**: se houver tiro vindo na sua direção, ela **come o tiro** (e recupera sangue). Com a fila vazia, clique para **cuspir o tiro de volta**. Sem tiro por perto, vira um dentão perfurante |
+| dente, dente, dente | **parry**: se houver tiro vindo na sua direção, ela **come o tiro** (e recupera sangue). Com a fila vazia, aperte `Espaço` para **cuspir o tiro de volta**. Sem tiro por perto, vira um dentão perfurante |
 
 Regras de fila:
 
@@ -114,11 +114,45 @@ Todo golpe dele tem um **aviso vermelho no chão** e uma animação de soco pró
   Chuva de Socos** e a barra zera.
 - Abaixo de 50% de vida ele **enfurece**: anda mais rápido, golpeia com menos aviso e enche a barra mais depressa.
 - Para treinar contra ele: `./run.sh --wave 5` começa direto na onda 5.
+
+## Arte
+
+Toda a arte é vetorial e gerada por código (`tools/`), em estilo anime/chibi, e fica pronta em `assets/`
+(folhas PNG + `assets/sprites.json`). O jogo só carrega os PNGs.
+
+- **A Vampirinha**: cabelo prateado em maria-chiquinha com presilhas de morcego, olhos vermelhos com pupila de
+  fenda, presinha, vestido gótico vermelho e capa de gola alta. Vista 3/4 de frente e de costas (espelhada para a
+  esquerda), com animações de parada, corrida, soco, chute, cuspe, arremesso, dash, voadora, dor, mordida do parry
+  e pulinho num pé só. Enquanto o braço está voando como bumerangue ela aparece **sem o braço**, e enquanto a perna
+  está voando ela **pula numa perna só**. No dash ela deixa um rastro.
+- **Forma de morcego**: morceguinho branco com asas vermelhas, que voa, morde e cai.
+- **Rosto no HUD**: o retrato muda conforme o estado: **normal**, **frenesi** (olhos vermelhos brilhando, sorriso
+  de presas), **quase sem sangue** (pálida, cansada, gota de suor), **dor** quando apanha, **morcego** e **morta**
+  (olho em X, alminha saindo). Ela pisca de vez em quando. Quando ela **cospe**, o retrato faz biquinho e **os dentes
+  saem voando da boca** (ou a perna, ou o tiro devolvido), quicam e somem.
+- **Inimigos**: caçador de chapéu com espada, atirador com mosquete e laser de mira, cachorro de caça e o Gigante
+  carrasco de capuz com manoplas de ferro (braços montados em tempo real para os socos). Todos com animações de
+  andar, aviso de golpe, ataque, dor e corpo caído.
+- **Efeitos de golpe**: garras vermelhas, arco dourado do chute, explosão do soco com dentes voando, corte azul
+  da espada, mandíbulas do parry e da mordida, faíscas de acerto (douradas no frenesi), ondas de choque e
+  rachaduras no chão nos socos do Gigante.
+- **Cenário**: chão de lajotas, túmulos, cruzes, velas acesas, ossos e matinhos.
+
+Para regerar a arte depois de mexer em `tools/art/`:
+
+```bash
+pip install -r tools/requirements.txt
+python3 tools/make_assets.py
+```
+
 ## Estrutura
 
 ```
-main.py              o jogo inteiro (entidades, chefe, combos, HUD)
-tests/test_smoke.py  testes sem janela das mecânicas (python tests/test_smoke.py)
+main.py              o jogo (entidades, chefe, combos, HUD)
+sprites.py           carrega a arte de assets/ e ajuda a desenhar (espelhar, piscar, girar efeitos)
+assets/              folhas de sprites geradas (PNG) + sprites.json
+tools/make_assets.py gera tudo em assets/ a partir de tools/art/ (vampira, retratos, inimigos, efeitos...)
+tests/test_smoke.py  testes sem janela das mecânicas e da arte (python tests/test_smoke.py)
 run.sh               atalho que cria o venv e roda
 ```
 
