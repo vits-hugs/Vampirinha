@@ -153,6 +153,23 @@ python3 tools/make_assets.py
 python3 tools/make_sounds.py
 ```
 
+## Modelo 3D
+
+`models/vampirinha.glb` é a personagem em 3D (glTF binário, ~39 mil triângulos, 1,62 m, Y para cima, olhando
+para +Z), feita a partir da folha de referência: cabelo preto comprido com franja, olhos vermelhos de anime,
+orelhas pontudas, presinha, vestido preto com saia vermelha, mangas bufantes, unhas vermelhas, capa preta forrada de
+vermelho com gola alta e botas de salto. Abre no Blender (Arquivo > Importar > glTF 2.0), Godot, Unity e em
+visualizadores web. Os materiais são separados por cor (pele, cabelo, olhos, tecido...), fáceis de trocar.
+
+Ele é gerado por código em `tools/make_model.py` (precisa de `numpy` e `trimesh`):
+
+```bash
+pip install numpy trimesh
+python3 tools/make_model.py
+```
+
+O modelo ainda não tem esqueleto/rig nem animações: está numa pose parada.
+
 ## Estrutura
 
 ```
@@ -162,6 +179,7 @@ sounds.py            toca os efeitos sonoros de assets/sfx/
 assets/              folhas de sprites geradas (PNG) + sprites.json
 tools/make_assets.py gera a arte em assets/ (vampira recortada de tools/ref/, retratos, inimigos, efeitos...)
 tools/make_sounds.py gera os sons em assets/sfx/
+tools/make_model.py  gera o modelo 3D em models/vampirinha.glb
 tests/test_smoke.py  testes sem janela das mecânicas e da arte (python tests/test_smoke.py)
 run.sh               atalho que cria o venv e roda
 ```
