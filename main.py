@@ -4,6 +4,7 @@
 Controles e combos: veja o README.md.
 """
 import math
+import os
 import random
 import sys
 
@@ -2371,7 +2372,9 @@ class Game:
 
 # --------------------------------------------------------------------- main
 def main():
-    pygame.mixer.pre_init(22050, -16, 1, 512)
+    pygame.mixer.pre_init(44100, -16, 2, 512)
+    # ao ampliar a janela (ou em tela cheia) a imagem é suavizada em vez de ficar serrilhada
+    os.environ.setdefault("SDL_RENDER_SCALE_QUALITY", "1")
     pygame.init()
     SFX.init()
     screen = pygame.display.set_mode((W, H), pygame.SCALED | pygame.RESIZABLE)

@@ -30,8 +30,12 @@ def _bg_masks(a):
 
 def load_frames():
     """Devolve {faixa: [(rgba recortado, (âncora_x, âncora_y))...]} com âncora nos pés."""
-    rgb = np.asarray(Image.open(REF).convert("RGB")).astype(int)
+    raw = np.asarray(Image.open(REF).convert("RGB"))
+    rgb = raw.astype(int)
     bg, bg_loose = _bg_masks(rgb)
+    # cores levemente desruidadas (a imagem tem ruído/compressão); a máscara usa a original
+    import cv2
+    smooth = cv2.bilateralFilter(np.ascontiguousarray(raw), 5, 22, 3).astype(float)
     out = {}
     for name, y0, y1, attach in BANDS:
         fg = ~bg[y0:y1]
@@ -73,12 +77,24 @@ def load_frames():
             ax = float(np.median(bxs)) if len(bxs) else float(xs.mean())
             x0, x1 = xs.min(), xs.max() + 1
             crop = np.zeros((ground + 1 - top + 1, x1 - x0, 4), np.uint8)
-            sub = rgb[y0 + top:y0 + ground + 2, x0:x1]
+            sub = smooth[y0 + top:y0 + ground + 2, x0:x1].copy()
             m = mask[top:ground + 2, x0:x1]
-            sub = sub.copy()
-            sub[..., 1] = np.minimum(sub[..., 1], np.maximum(sub[..., 0], sub[..., 2]))  # tira o verde do fundo
-            crop[:m.shape[0], :, :3] = sub[:m.shape[0]]
-            crop[:m.shape[0], :, 3] = np.where(m, 255, 0)
+            sub = sub[:m.shape[0]]
+            # transparência suave na borda: proporcional à distância da cor do fundo da faixa,
+            # e a cor da borda "desmisturada" do fundo (sem franja cinza/verde)
+            bgcol = np.median(rgb[y0:y1][bg[y0:y1]], axis=0)
+            dist = np.sqrt(((sub - bgcol) ** 2).sum(axis=2))
+            core = nd.binary_erosion(m, iterations=1)
+            ring = nd.binary_dilation(m, iterations=1) & ~core
+            alpha = np.where(core, 1.0, 0.0)
+            alpha = np.where(ring, np.clip((dist - 18.0) / 70.0, 0.0, 1.0), alpha)
+            alpha = np.maximum(nd.gaussian_filter(alpha, 0.55), nd.binary_erosion(m, iterations=2))
+            alpha[alpha < 0.06] = 0
+            unmix = bgcol + (sub - bgcol) / np.maximum(alpha, 0.35)[..., None]
+            col = np.where(ring[..., None], unmix, sub)
+            col[..., 1] = np.minimum(col[..., 1], np.maximum(col[..., 0], col[..., 2]))  # tira o verde do fundo
+            crop[:m.shape[0], :, :3] = np.clip(col, 0, 255).astype(np.uint8)
+            crop[:m.shape[0], :, 3] = (alpha * 255).astype(np.uint8)
             # pontos úteis (rosto olhando para a direita): topo da cabeça, olhos, boca
             head = body[top:top + 24]
             hys, hxs = np.nonzero(head)
@@ -107,3 +123,37 @@ def to_cells(frames, cell, anchor):
             return [round(p[0] - ax, 1), round(p[1] - ay, 1)]
         cells.append((c, {"head": rel(pts["head"]), "eyes": [rel(e) for e in pts["eyes"]], "mouth": rel(pts["mouth"])}))
     return cells
+
+
+def inbetween(a, b, t=0.5):
+    """Quadro intermediário entre a e b (RGBA alinhados pelos pés) por fluxo óptico:
+    estima o movimento de cada pixel e desenha a pose "no meio do caminho"."""
+    import cv2
+
+    def pm(img):
+        f = img.astype(np.float32) / 255.0
+        f[..., :3] *= f[..., 3:4]
+        return f
+
+    def gray(img):
+        g = cv2.cvtColor(img[..., :3], cv2.COLOR_RGB2GRAY).astype(np.float32)
+        g = g * (img[..., 3].astype(np.float32) / 255.0) + (255 - img[..., 3].astype(np.float32)) * 0.35
+        return np.clip(g, 0, 255).astype(np.uint8)
+
+    dis = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+    ga, gb = gray(a), gray(b)
+    f_ab = dis.calc(ga, gb, None)
+    f_ba = dis.calc(gb, ga, None)
+    h, w = ga.shape
+    gx, gy = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
+    pa, pb = pm(a), pm(b)
+    # amostra a recuando t do caminho (fluxo b->a) e b avançando (1-t) (fluxo a->b)
+    wa = cv2.remap(pa, gx + f_ba[..., 0] * t, gy + f_ba[..., 1] * t, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+    wb = cv2.remap(pb, gx + f_ab[..., 0] * (1 - t), gy + f_ab[..., 1] * (1 - t), cv2.INTER_LINEAR,
+                   borderMode=cv2.BORDER_CONSTANT)
+    mid = wa * (1 - t) + wb * t
+    al = mid[..., 3:4]
+    out = np.zeros_like(a)
+    out[..., :3] = np.clip(np.where(al > 1e-3, mid[..., :3] / np.maximum(al, 1e-3), 0) * 255, 0, 255).astype(np.uint8)
+    out[..., 3] = np.clip(al[..., 0] * 255, 0, 255).astype(np.uint8)
+    return out

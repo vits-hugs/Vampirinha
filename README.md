@@ -137,10 +137,12 @@ Todo golpe dele tem um **aviso vermelho no chão** e uma animação de soco pró
 
 ## Sons
 
-27 efeitos sonoros sintetizados por código (`tools/make_sounds.py`, sem arquivos de fora): garras, cuspe, chute,
-soco, dash, arremesso, parry, dor, frenesi, virar morcego, voltar ao normal, mordida, morte, acertos, espada, tiro e
-mira, latido, golpes e soco no chão do Gigante, rugido, aviso da Chuva de Socos e início/fim de onda.
-`M` liga e desliga o som. Sem saída de áudio o jogo roda mudo, sem erro.
+27 efeitos sonoros sintetizados por código (`tools/make_sounds.py`, sem arquivos de fora), em estéreo 44,1 kHz:
+cada um é montado em camadas (ataque, corpo e cauda) com filtros ressonantes, vozes por formantes (latido, rugido,
+gemido dela) e um reverb de sala de pedra. Cada som tem até 3 variações de tom, sorteadas a cada vez, para não
+ficar repetitivo. São eles: garras, cuspe, chute, soco, dash, arremesso, parry, dor, frenesi, virar morcego, voltar
+ao normal, mordida, morte, acertos, espada, tiro e mira, latido, golpes e soco no chão do Gigante, rugido, aviso da
+Chuva de Socos e início/fim de onda. `M` liga e desliga o som. Sem saída de áudio o jogo roda mudo, sem erro.
 
 Para regerar a arte ou os sons depois de mexer em `tools/`:
 

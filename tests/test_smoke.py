@@ -840,7 +840,7 @@ def test_effects_render_rotated_and_cached():
 # ------------------------------------------------------------------ sons
 def test_sounds_load_and_play_on_events():
     import sounds
-    assert len([f for f in os.listdir(sounds.SFX_DIR) if f.endswith(".wav")]) >= 25
+    assert len({f.split(".")[0] for f in os.listdir(sounds.SFX_DIR) if f.endswith(".ogg")}) >= 25
     sounds.init()  # com SDL_AUDIODRIVER=dummy o mixer abre; sem áudio, tudo vira silêncio
     heard = []
     orig = sounds.play

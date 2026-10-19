@@ -1,9 +1,10 @@
-"""Efeitos sonoros (assets/sfx/*.wav, gerados por tools/make_sounds.py).
+"""Efeitos sonoros (assets/sfx/*.ogg, gerados por tools/make_sounds.py).
 
 Se não houver saída de áudio, tudo vira silêncio sem erro. Cada som tem um intervalo
 mínimo entre repetições, para que 10 acertos no mesmo quadro não virem um estouro.
 """
 import os
+import random
 
 import pygame
 
@@ -28,14 +29,14 @@ def init():
         return True
     try:
         if not pygame.mixer.get_init():
-            pygame.mixer.init(22050, -16, 1, 512)
-        pygame.mixer.set_num_channels(24)
-        for fn in os.listdir(SFX_DIR):
-            if fn.endswith(".wav"):
-                name = fn[:-4]
+            pygame.mixer.init(44100, -16, 2, 512)
+        pygame.mixer.set_num_channels(32)
+        for fn in sorted(os.listdir(SFX_DIR)):
+            if fn.endswith(".ogg"):
+                name = fn.split(".")[0]
                 snd = pygame.mixer.Sound(os.path.join(SFX_DIR, fn))
                 snd.set_volume(VOLUME.get(name, 0.5))
-                _sounds[name] = snd
+                _sounds.setdefault(name, []).append(snd)
         _ok = True
     except (pygame.error, OSError):
         _ok = False
@@ -45,9 +46,10 @@ def init():
 def play(name, volume=1.0):
     if muted or not _ok:
         return None
-    snd = _sounds.get(name)
-    if snd is None:
+    variants = _sounds.get(name)
+    if not variants:
         return None
+    snd = random.choice(variants)
     now = pygame.time.get_ticks() / 1000.0
     if now - _last.get(name, -9.0) < GAP.get(name, 0.03):
         return None

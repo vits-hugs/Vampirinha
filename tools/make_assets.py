@@ -154,10 +154,31 @@ def build_vampire(meta):
     index[("breath", 0)] = len(frames)
     frames.append(breath)
     points.append(points[index[("walk", 0)]])
+    # animação mais suave: um quadro intermediário (fluxo óptico) entre cada par de quadros da folha
+    mids = {}
+
+    def mid(i, j):
+        if (i, j) not in mids:
+            mids[(i, j)] = len(frames)
+            frames.append(ref_sheet.inbetween(frames[i], frames[j]))
+            points.append(points[i])
+        return mids[(i, j)]
+
     for name, (band, ids, fps, loop) in VAMP_ANIMS.items():
         idx = [index[(band, i)] for i in ids]
         if name == "idle":
             idx = [index[("walk", 0)], index[("breath", 0)]]
+        elif len(set(idx)) > 1:
+            smooth = []
+            pairs = list(zip(idx, idx[1:] + ([idx[0]] if loop else [])))
+            for a, b in pairs:
+                smooth.append(a)
+                if a != b:
+                    smooth.append(mid(a, b))
+            if not loop:
+                smooth.append(idx[-1])
+            idx = smooth
+            fps *= 2
         for view in ("front", "back"):  # só existe a vista de lado; as duas chaves apontam para ela
             anims[view + "/" + name] = {"fps": fps, "loop": loop, "frames": idx}
     rgba, cols = kit.sheet(frames, cols=16)
