@@ -229,6 +229,12 @@ def build():
 
     with open(os.path.join(OUT, "sprites.json"), "w") as f:
         json.dump(meta, f, separators=(",", ":"))
+    # apaga folhas antigas que esta versão do gerador não produz mais
+    for fn in sorted(os.listdir(OUT)):
+        full = os.path.join(OUT, fn)
+        if fn.endswith(".png") and os.path.getmtime(full) < t0 - 1:
+            os.remove(full)
+            print("  removido   %s (não é mais gerado)" % fn)
     print("Pronto em %.1fs" % (time.time() - t0))
 
 
